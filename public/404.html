@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SplitGit</title>
+    <script>
+      // GitHub Pages SPA redirect trick.
+      // When GitHub serves a 404 for a deep link (e.g. /splitgit/groups/alice/hiking),
+      // this page encodes the path into the query string and redirects to index.html,
+      // which then restores it. This makes direct URL access and page refreshes work.
+      var l = window.location
+      var segmentCount = 1 // number of path segments in the repo base (1 for /splitgit)
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + segmentCount).join('/') +
+        '/?p=/' + l.pathname.split('/').slice(1 + segmentCount).join('/').replace(/&/g, '~and~') +
+        (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+        l.hash
+      )
+    </script>
+  </head>
+  <body></body>
+</html>

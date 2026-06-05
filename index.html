@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#18181b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SplitGit" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>SplitGit</title>
+    <!-- GitHub Pages SPA: restore path encoded by 404.html -->
+    <script>
+      (function() {
+        var redirect = sessionStorage.redirect
+        delete sessionStorage.redirect
+        if (redirect && redirect !== location.href) {
+          history.replaceState(null, null, redirect)
+        }
+        // Also handle the ?p= query param set by 404.html
+        var search = location.search
+        if (search.indexOf('?p=/') === 0 || search.indexOf('&p=/') > -1) {
+          var params = search.slice(1).split('&').reduce(function(p, s) {
+            var eq = s.indexOf('=')
+            p[s.slice(0, eq)] = s.slice(eq + 1)
+            return p
+          }, {})
+          if (params.p) {
+            var path = params.p.replace(/~and~/g, '&')
+            var query = params.q ? '?' + params.q.replace(/~and~/g, '&') : ''
+            history.replaceState(null, null, location.pathname.split('?')[0] + path + query + location.hash)
+          }
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
