@@ -23,9 +23,11 @@ const EXPENSES_FILE_PATH = 'expenses.json'
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export function buildOAuthUrl(state: string): string {
+  // Use the actual current base path so it works both locally and on GitHub Pages
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '') // e.g. /splitgit or ''
   const params = new URLSearchParams({
     client_id: GITHUB_OAUTH_CONFIG.clientId,
-    redirect_uri: `${window.location.origin}/auth/callback`,
+    redirect_uri: `${window.location.origin}${base}/auth/callback`,
     scope: GITHUB_OAUTH_CONFIG.scope,
     state
   })
