@@ -17,7 +17,7 @@ export function AddExpense() {
 
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
-  const [currency, setCurrency] = useState('USD')
+  const [currency, setCurrency] = useState('INR')
   const [paidBy, setPaidBy] = useState(user?.login ?? '')
   const [participants, setParticipants] = useState<Set<string>>(
     new Set(user ? [user.login] : [])
@@ -122,16 +122,12 @@ export function AddExpense() {
                 return (
                   <button key={tag.name} type="button"
                     onClick={() => setSelectedTag(selected ? '' : tag.name)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all
-                      ${selected ? 'border-transparent text-white' : 'border-zinc-300 text-zinc-600 hover:border-zinc-400 bg-white'}`}
-                    style={selected ? { backgroundColor: tag.color } : {}}>
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-all
+                      ${selected
+                        ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
+                        : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
                     {tag.emoji && <span>{tag.emoji}</span>}
                     {tag.name}
-                    {selected && (
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M2 7l4 4 6-6" />
-                      </svg>
-                    )}
                   </button>
                 )
               })}

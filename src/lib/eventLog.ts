@@ -5,9 +5,9 @@
  */
 
 import { Octokit } from 'octokit'
-import type { Event, Expense, Settlement } from '../types'
+import type { Event, Expense, Settlement, ExpenseDeletion } from '../types'
 import { getExpensesFile, updateExpensesFile } from './github'
-import { hashExpense, hashSettlement } from './hash'
+import { hashExpense, hashSettlement, hashDeletion } from './hash'
 import { getCachedEvents, setCachedEvents } from './cache'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -62,6 +62,8 @@ async function appendEvent(
       const message =
         newEvent.type === 'EXPENSE'
           ? `expense: ${(newEvent as Expense).description} — ${(newEvent as Expense).amount} ${(newEvent as Expense).currency}`
+          : newEvent.type === 'EXPENSE_DELETION'
+          ? `delete: expense ${(newEvent as ExpenseDeletion).deletedId.slice(0, 8)}`
           : `settle: ${(newEvent as Settlement).from} → ${(newEvent as Settlement).to} — ${(newEvent as Settlement).amount}`
       await updateExpensesFile(octokit, owner, repo, JSON.stringify(updated, null, 2), sha, message)
       await setCachedEvents(owner, repo, sha, updated)
@@ -207,23 +209,48 @@ export async function addSettlement(
   return settlement
 }
 
+// ─── Delete event (append-only: adds an EXPENSE_DELETION record) ──────────────
+
+export async function deleteExpense(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  expenseId: string,
+  deletedBy: string
+): Promise<void> {
+  const id = uuidv4()
+  const createdAt = new Date().toISOString()
+  const base = { id, type: 'EXPENSE_DELETION' as const, deletedId: expenseId, deletedBy, createdAt }
+  const hash = await hashDeletion(base)
+  const deletion: ExpenseDeletion = { ...base, hash }
+  await appendEvent(octokit, owner, repo, deletion)
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Resolve the effective list of expenses after applying edits.
- * For each originalId, only the latest superseding version is shown.
+ * Resolve the effective list of expenses after applying edits and deletions.
+ * - Deleted expenses are excluded entirely.
+ * - For edited expenses, only the latest version is shown.
  */
 export function resolveExpenses(events: Event[]): Expense[] {
   const expenses = events.filter(e => e.type === 'EXPENSE') as Expense[]
 
-  // Build a map from originalId → latest correction
+  // Build set of deleted expense IDs
+  const deletedIds = new Set(
+    events
+      .filter(e => e.type === 'EXPENSE_DELETION')
+      .map(e => (e as ExpenseDeletion).deletedId)
+  )
+
+  // Build map from originalId → latest correction id (for edits)
   const supersededBy = new Map<string, string>()
   for (const e of expenses) {
-    if (e.supersedesId) {
-      supersededBy.set(e.supersedesId, e.id)
-    }
+    if (e.supersedesId) supersededBy.set(e.supersedesId, e.id)
   }
 
-  // Filter out any expense that has been superseded
-  return expenses.filter(e => !supersededBy.has(e.id) || supersededBy.get(e.id) === e.id)
+  return expenses.filter(e =>
+    !deletedIds.has(e.id) &&               // not deleted
+    (!supersededBy.has(e.id) || supersededBy.get(e.id) === e.id) // latest version
+  )
 }

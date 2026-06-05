@@ -4,7 +4,7 @@
  * Any edit to the event data will produce a different hash.
  */
 
-import type { Expense, Settlement } from '../types'
+import type { Expense, Settlement, ExpenseDeletion } from '../types'
 
 type HashableExpense = Omit<Expense, 'hash'>
 type HashableSettlement = Omit<Settlement, 'hash'>
@@ -41,6 +41,17 @@ export async function hashSettlement(s: HashableSettlement): Promise<string> {
     amount: s.amount,
     currency: s.currency,
     createdAt: s.createdAt
+  })
+  return sha256(canonical)
+}
+
+export async function hashDeletion(d: Omit<ExpenseDeletion, 'hash'>): Promise<string> {
+  const canonical = JSON.stringify({
+    id: d.id,
+    type: d.type,
+    deletedId: d.deletedId,
+    deletedBy: d.deletedBy,
+    createdAt: d.createdAt
   })
   return sha256(canonical)
 }

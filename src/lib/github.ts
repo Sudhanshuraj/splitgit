@@ -7,6 +7,23 @@ import { Octokit } from 'octokit'
 import type { Group, Member, GroupConfig } from '../types'
 import { DEFAULT_GROUP_CONFIG } from '../types'
 
+// ─── Unicode-safe base64 helpers ─────────────────────────────────────────────
+// btoa/atob only handle Latin-1. These handle emoji and all Unicode.
+
+function toBase64(str: string): string {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) =>
+    String.fromCharCode(parseInt(p1, 16))
+  ))
+}
+
+function fromBase64(str: string): string {
+  return decodeURIComponent(
+    atob(str.replace(/\n/g, '')).split('').map(c =>
+      '%' + c.charCodeAt(0).toString(16).padStart(2, '0')
+    ).join('')
+  )
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 /** Fill these in after setting up your GitHub OAuth App + Cloudflare Worker */
@@ -121,7 +138,7 @@ export async function createGroup(
   })
 
   // Commit the initial empty expenses.json
-  const content = btoa(JSON.stringify([], null, 2))
+  const content = toBase64(JSON.stringify([], null, 2))
   await octokit.rest.repos.createOrUpdateFileContents({
     owner: repo.owner.login,
     repo: repo.name,
@@ -207,7 +224,7 @@ export async function getExpensesFile(
   if (Array.isArray(data) || data.type !== 'file') {
     throw new Error('expenses.json is not a file')
   }
-  return { content: atob(data.content.replace(/\n/g, '')), sha: data.sha }
+  return { content: fromBase64(data.content), sha: data.sha }
 }
 
 export async function updateExpensesFile(
@@ -223,7 +240,7 @@ export async function updateExpensesFile(
     repo,
     path: EXPENSES_FILE_PATH,
     message: commitMessage,
-    content: btoa(content),
+    content: toBase64(content),
     sha
   })
 }
@@ -245,7 +262,7 @@ export async function getGroupConfig(
     if (Array.isArray(data) || data.type !== 'file') {
       return { config: DEFAULT_GROUP_CONFIG, sha: null }
     }
-    const config = JSON.parse(atob(data.content.replace(/\n/g, ''))) as GroupConfig
+    const config = JSON.parse(fromBase64(data.content)) as GroupConfig
     return { config, sha: data.sha }
   } catch {
     // File doesn't exist yet — return defaults
@@ -265,7 +282,7 @@ export async function saveGroupConfig(
     repo,
     path: CONFIG_FILE_PATH,
     message: 'config: update group tags',
-    content: btoa(JSON.stringify(config, null, 2))
+    content: toBase64(JSON.stringify(config, null, 2))
   }
   if (existingSha) {
     (params as Record<string, unknown>).sha = existingSha

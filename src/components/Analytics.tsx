@@ -47,15 +47,16 @@ function getPresetRange(preset: Exclude<RangePreset, 'custom'>): DateRange {
 
 // ─── Pie chart ────────────────────────────────────────────────────────────────
 
+// Fixed palette — no longer driven by TagConfig.color
 const TAG_COLORS = [
   '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6',
   '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'
 ]
-
 const UNTAGGED_COLOR = '#94a3b8'
 
 interface Slice {
   label: string
+  emoji?: string
   amount: number
   color: string
   percentage: number
@@ -71,9 +72,26 @@ function PieChart({ slices }: { slices: Slice[] }) {
   const cy = 100
   const r = 80
 
-  // Build SVG arc paths
-  let cumulativeAngle = -Math.PI / 2
+  // Single-slice special case: arc path at exactly 360° is degenerate — use a circle instead
+  if (slices.length === 1) {
+    const slice = slices[0]!
+    return (
+      <div className="flex flex-col items-center">
+        <svg viewBox="0 0 200 200" className="w-48 h-48"
+          style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.08))' }}>
+          <circle cx={cx} cy={cy} r={r} fill={slice.color} />
+          <text x={cx} y={cy - 6} textAnchor="middle" fontSize="11" fill="white" fontFamily="system-ui">
+            {slice.emoji ?? slice.label}
+          </text>
+          <text x={cx} y={cy + 10} textAnchor="middle" fontSize="13" fontWeight="600" fill="white" fontFamily="system-ui">
+            100%
+          </text>
+        </svg>
+      </div>
+    )
+  }
 
+  let cumulativeAngle = -Math.PI / 2
   const paths = slices.map((slice, i) => {
     const angle = (slice.amount / total) * 2 * Math.PI
     const startAngle = cumulativeAngle
@@ -94,33 +112,23 @@ function PieChart({ slices }: { slices: Slice[] }) {
 
   return (
     <div className="flex flex-col items-center">
-      <svg
-        viewBox="0 0 200 200"
-        className="w-48 h-48"
-        style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.08))' }}
-      >
+      <svg viewBox="0 0 200 200" className="w-48 h-48"
+        style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.08))' }}>
         {paths.map(({ d, color, i }) => (
-          <path
-            key={i}
-            d={d}
-            fill={color}
-            stroke="white"
-            strokeWidth="2"
+          <path key={i} d={d} fill={color} stroke="white" strokeWidth="2"
             className="transition-opacity duration-150 cursor-pointer"
             opacity={hovered === null || hovered === i ? 1 : 0.5}
             onMouseEnter={() => setHovered(i)}
             onMouseLeave={() => setHovered(null)}
           />
         ))}
-        {/* Centre label */}
         <text x={cx} y={cy - 6} textAnchor="middle" fontSize="11" fill="#64748b" fontFamily="system-ui">
-          {hoveredSlice ? hoveredSlice.label : 'Total'}
+          {hoveredSlice ? (hoveredSlice.emoji ?? hoveredSlice.label) : 'Total'}
         </text>
         <text x={cx} y={cy + 10} textAnchor="middle" fontSize="13" fontWeight="600" fill="#0f172a" fontFamily="system-ui">
           {hoveredSlice
             ? `${hoveredSlice.percentage.toFixed(0)}%`
-            : `${slices.length} tag${slices.length !== 1 ? 's' : ''}`
-          }
+            : `${slices.length} tag${slices.length !== 1 ? 's' : ''}`}
         </text>
       </svg>
     </div>
@@ -187,48 +195,34 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
     })
   }, [events, range])
 
-  // Build tag color + emoji maps
-  const tagColorMap = useMemo(() => {
-    const map = new Map<string, string>()
-    tags.forEach((t, i) => {
-      map.set(t.name, t.color || TAG_COLORS[i % TAG_COLORS.length]!)
-    })
-    return map
-  }, [tags])
-
+  // Emoji lookup
   const tagEmojiMap = useMemo(() => {
     const map = new Map<string, string>()
     tags.forEach(t => { if (t.emoji) map.set(t.name, t.emoji) })
     return map
   }, [tags])
 
-  // Aggregate by tag
+  // Aggregate spend by tag
   const slices: Slice[] = useMemo(() => {
     const byTag = new Map<string, number>()
     let total = 0
 
     for (const e of expenses) {
       total += e.amount
-      if (e.tags.length === 0) {
-        byTag.set('Untagged', (byTag.get('Untagged') ?? 0) + e.amount)
-      } else {
-        // Split evenly across tags for multi-tagged expenses
-        const perTag = e.amount / e.tags.length
-        for (const tag of e.tags) {
-          byTag.set(tag, (byTag.get(tag) ?? 0) + perTag)
-        }
-      }
+      const tag = e.tags[0] ?? 'Untagged'
+      byTag.set(tag, (byTag.get(tag) ?? 0) + e.amount)
     }
 
     return Array.from(byTag.entries())
       .map(([label, amount], i) => ({
         label,
+        emoji: tagEmojiMap.get(label),
         amount: parseFloat(amount.toFixed(2)),
-        color: label === 'Untagged' ? UNTAGGED_COLOR : (tagColorMap.get(label) ?? TAG_COLORS[i % TAG_COLORS.length]!),
+        color: label === 'Untagged' ? UNTAGGED_COLOR : TAG_COLORS[i % TAG_COLORS.length]!,
         percentage: total > 0 ? (amount / total) * 100 : 0
       }))
       .sort((a, b) => b.amount - a.amount)
-  }, [expenses, tagColorMap])
+  }, [expenses, tagEmojiMap])
 
   const totalSpend = expenses.reduce((s, e) => s + e.amount, 0)
   const expenseCount = expenses.length
@@ -300,13 +294,8 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
             <div className="divide-y divide-zinc-100">
               {slices.map((slice, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-3">
-                  <div
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ backgroundColor: slice.color }}
-                  />
-                  {tagEmojiMap.get(slice.label) && (
-                    <span className="text-base">{tagEmojiMap.get(slice.label)}</span>
-                  )}
+                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: slice.color }} />
+                  {slice.emoji && <span className="text-base">{slice.emoji}</span>}
                   <span className="text-sm text-zinc-800 flex-1 font-medium">{slice.label}</span>
                   <span className="text-xs text-zinc-400 mr-2">{slice.percentage.toFixed(1)}%</span>
                   <span className="text-sm font-semibold text-zinc-900">
@@ -335,14 +324,7 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
                           {new Date(e.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </p>
                         {e.tags.map(tag => (
-                          <span
-                            key={tag}
-                            className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                            style={{
-                              backgroundColor: (tagColorMap.get(tag) ?? UNTAGGED_COLOR) + '20',
-                              color: tagColorMap.get(tag) ?? UNTAGGED_COLOR
-                            }}
-                          >
+                          <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
                             {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
                             {tag}
                           </span>

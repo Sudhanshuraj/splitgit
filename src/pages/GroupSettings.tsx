@@ -1,8 +1,3 @@
-/**
- * Group Settings — manage tags for a group.
- * Only the repo owner can access this page.
- * Each transaction requires exactly one tag.
- */
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -13,15 +8,10 @@ import { Spinner } from '../components/Spinner'
 import type { TagConfig } from '../types'
 
 const PRESET_EMOJIS = [
-  '🍔', '🍕', '☕', '🍺', '🛒',   // food & drink
-  '🚗', '✈️', '🚆', '⛽', '🛵',   // transport
-  '🏨', '🏠', '🎬', '🎮', '🎵',   // stay & fun
-  '💊', '🛍️', '📦', '💡', '🧾',  // misc
-]
-
-const PRESET_COLORS = [
-  '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'
+  '🍔', '🍕', '☕', '🍺', '🛒',
+  '🚗', '✈️', '🚆', '⛽', '🛵',
+  '🏨', '🏠', '🎬', '🎮', '🎵',
+  '💊', '🛍️', '📦', '💡', '🧾',
 ]
 
 export function GroupSettings() {
@@ -31,7 +21,6 @@ export function GroupSettings() {
   const qc = useQueryClient()
 
   const [newTagName, setNewTagName] = useState('')
-  const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]!)
   const [newTagEmoji, setNewTagEmoji] = useState('')
 
   const { data: configData, isLoading } = useQuery({
@@ -42,11 +31,7 @@ export function GroupSettings() {
 
   const saveMutation = useMutation({
     mutationFn: (tags: TagConfig[]) =>
-      saveGroupConfig(
-        octokit!, owner!, repo!,
-        { version: 1, tags },
-        configData?.sha ?? null
-      ),
+      saveGroupConfig(octokit!, owner!, repo!, { version: 1, tags }, configData?.sha ?? null),
     onSuccess: async () => {
       await invalidateCachedConfig(owner!, repo!)
       qc.invalidateQueries({ queryKey: ['config', owner, repo] })
@@ -58,15 +43,12 @@ export function GroupSettings() {
 
   function addTag() {
     if (!newTagName.trim()) return
-    const updated: TagConfig[] = [...tags, {
-      name: newTagName.trim(),
-      color: newTagColor,
-      emoji: newTagEmoji || undefined,
-      mandatory: false
-    }]
+    const updated: TagConfig[] = [
+      ...tags,
+      { name: newTagName.trim(), emoji: newTagEmoji || undefined }
+    ]
     saveMutation.mutate(updated)
     setNewTagName('')
-    setNewTagColor(PRESET_COLORS[0]!)
     setNewTagEmoji('')
   }
 
@@ -101,9 +83,8 @@ export function GroupSettings() {
       {isLoading ? <Spinner className="py-12" /> : (
         <div className="space-y-6">
 
-          {/* Info banner */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
-            Every expense requires exactly one tag. Add the categories you want members to choose from.
+            Every expense requires exactly one tag. Add the categories you want members to use.
           </div>
 
           {/* Existing tags */}
@@ -121,9 +102,8 @@ export function GroupSettings() {
                 {tags.map(tag => (
                   <div key={tag.name}
                     className="flex items-center gap-3 bg-white border border-zinc-200 rounded-xl px-4 py-3">
-                    <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
-                    {tag.emoji && <span className="text-base">{tag.emoji}</span>}
-                    <span className="flex-1 font-medium text-zinc-800 text-sm">{tag.name}</span>
+                    <span className="text-xl w-7 text-center">{tag.emoji ?? '🏷️'}</span>
+                    <span className="flex-1 font-medium text-zinc-800">{tag.name}</span>
                     <button
                       onClick={() => removeTag(tag.name)}
                       disabled={saveMutation.isPending}
@@ -143,7 +123,7 @@ export function GroupSettings() {
             <h2 className="text-sm font-semibold text-zinc-700">Add Tag</h2>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-600 mb-1.5">Tag name</label>
+              <label className="block text-xs font-medium text-zinc-600 mb-1.5">Name</label>
               <input
                 type="text"
                 value={newTagName}
@@ -160,9 +140,10 @@ export function GroupSettings() {
               </label>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {PRESET_EMOJIS.map(e => (
-                  <button key={e} type="button" onClick={() => setNewTagEmoji(newTagEmoji === e ? '' : e)}
-                    className={`w-9 h-9 text-lg rounded-xl transition-all flex items-center justify-center
-                      ${newTagEmoji === e ? 'bg-emerald-100 ring-2 ring-emerald-400' : 'bg-zinc-100 hover:bg-zinc-200'}`}>
+                  <button key={e} type="button"
+                    onClick={() => setNewTagEmoji(newTagEmoji === e ? '' : e)}
+                    className={`w-9 h-9 text-lg rounded-xl flex items-center justify-center transition-all
+                      ${newTagEmoji === e ? 'bg-emerald-100 ring-2 ring-emerald-400' : 'bg-white border border-zinc-200 hover:border-zinc-300'}`}>
                     {e}
                   </button>
                 ))}
@@ -175,20 +156,6 @@ export function GroupSettings() {
                 maxLength={4}
                 className="w-full border border-zinc-300 rounded-xl px-3 py-2 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm bg-white"
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-600 mb-2">Color</label>
-              <div className="flex flex-wrap gap-2">
-                {PRESET_COLORS.map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setNewTagColor(color)}
-                    className={`w-7 h-7 rounded-full transition-transform ${newTagColor === color ? 'scale-125 ring-2 ring-offset-2 ring-zinc-400' : 'hover:scale-110'}`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
             </div>
 
             {saveMutation.error && (

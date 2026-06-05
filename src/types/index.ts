@@ -32,7 +32,16 @@ export interface Settlement {
   hash: string
 }
 
-export type Event = Expense | Settlement
+export interface ExpenseDeletion {
+  id: string
+  type: 'EXPENSE_DELETION'
+  deletedId: string   // id of the expense being soft-deleted
+  deletedBy: string   // GitHub username of who deleted it
+  createdAt: string
+  hash: string
+}
+
+export type Event = Expense | Settlement | ExpenseDeletion
 
 // ─── GitHub-backed group ──────────────────────────────────────────────────────
 
@@ -84,9 +93,10 @@ export interface AuthUser {
 
 export interface TagConfig {
   name: string        // e.g. "Food", "Transport"
-  color: string       // hex color for display e.g. "#10b981"
   emoji?: string      // optional emoji prefix e.g. "🍔"
-  mandatory: boolean  // kept for backward compat, no longer used in UI
+  // color + mandatory kept as optional for backward compat with old configs
+  color?: string
+  mandatory?: boolean
 }
 
 export interface GroupConfig {

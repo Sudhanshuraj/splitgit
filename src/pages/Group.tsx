@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { readEvents } from '../lib/eventLog'
+import { readEvents, resolveExpenses, deleteExpense } from '../lib/eventLog'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
 import { listMembers, inviteMember, getGroupConfig } from '../lib/github'
 import { Spinner } from '../components/Spinner'
@@ -21,6 +21,7 @@ export function Group() {
   const [showInvite, setShowInvite] = useState(false)
   const [inviteUsername, setInviteUsername] = useState('')
   const [activeTab, setActiveTab] = useState<'balances' | 'history' | 'analytics'>('balances')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const { data: eventData, isLoading: eventsLoading } = useQuery({
     queryKey: ['events', owner, repo],
@@ -53,13 +54,29 @@ export function Group() {
     }
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (expenseId: string) =>
+      deleteExpense(octokit!, owner!, repo!, expenseId, user!.login),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events', owner, repo] })
+      setConfirmDeleteId(null)
+    }
+  })
+
   if (!owner || !repo) {
     navigate('/groups')
     return null
   }
 
   const events = eventData?.events ?? []
-  const balances = computeNetBalances(events)
+
+  // Resolve events: apply edits + deletions before computing balances
+  const effectiveEvents = [
+    ...resolveExpenses(events),
+    ...events.filter(e => e.type === 'SETTLEMENT')
+  ] as Event[]
+
+  const balances = computeNetBalances(effectiveEvents)
   const defaultCurrency = events.find(e => e.type === 'EXPENSE')
     ? (events.find(e => e.type === 'EXPENSE') as Expense).currency
     : 'USD'
@@ -171,6 +188,41 @@ export function Group() {
         </div>
       )}
 
+      {/* Delete confirmation modal */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-safe">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h2 className="text-xl font-bold text-zinc-900 mb-2">Delete Expense?</h2>
+            <p className="text-sm text-zinc-500 mb-1">
+              The expense will be hidden from balances and history.
+            </p>
+            <p className="text-xs text-zinc-400 mb-5">
+              The original commit is preserved in git history.
+            </p>
+            {deleteMutation.error && (
+              <p className="text-red-600 text-sm mb-3">
+                {deleteMutation.error instanceof Error ? deleteMutation.error.message : 'Failed to delete'}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setConfirmDeleteId(null); deleteMutation.reset() }}
+                className="flex-1 border border-zinc-300 text-zinc-700 font-medium py-3 rounded-xl hover:bg-zinc-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate(confirmDeleteId)}
+                disabled={deleteMutation.isPending}
+                className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-zinc-300 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                {deleteMutation.isPending ? <Spinner /> : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex bg-zinc-100 rounded-xl p-1 mb-4">
         {(['balances', 'history', 'analytics'] as const).map(tab => (
@@ -257,6 +309,12 @@ export function Group() {
                     (user?.login === (event as Expense).paidBy || user?.login === owner)
                   }
                   editUrl={`/groups/${owner}/${repo}/edit/${event.id}`}
+                  onDelete={
+                    event.type === 'EXPENSE' &&
+                    (user?.login === (event as Expense).paidBy || user?.login === owner)
+                      ? () => setConfirmDeleteId(event.id)
+                      : undefined
+                  }
                 />
               ))
           )}
@@ -283,18 +341,18 @@ function MemberAvatar({ login, members }: { login: string; members: { login: str
 }
 
 function EventRow({
-  event, tags, isEdited = false, canEdit = false, editUrl = ''
+  event, tags, isEdited = false, canEdit = false, editUrl = '', onDelete
 }: {
   event: Event
   tags: TagConfig[]
   isEdited?: boolean
   canEdit?: boolean
   editUrl?: string
+  onDelete?: () => void
 }) {
   const date = new Date(event.createdAt).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric'
   })
-  const tagColorMap = new Map(tags.map((t, i) => [t.name, t.color || ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6'][i % 5]]))
   const tagEmojiMap = new Map(tags.filter(t => t.emoji).map(t => [t.name, t.emoji!]))
 
   if (event.type === 'EXPENSE') {
@@ -314,15 +372,14 @@ function EventRow({
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {date}</p>
             {(e.tags ?? []).map(tag => (
-              <span key={tag} className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                style={{ backgroundColor: (tagColorMap.get(tag) ?? '#94a3b8') + '25', color: tagColorMap.get(tag) ?? '#94a3b8' }}>
+              <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
                 {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
                 {tag}
               </span>
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <p className="font-semibold text-zinc-900">{formatAmount(e.amount, e.currency)}</p>
           {canEdit && (
             <Link to={editUrl}
@@ -332,6 +389,15 @@ function EventRow({
                 <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
               </svg>
             </Link>
+          )}
+          {onDelete && (
+            <button onClick={onDelete}
+              className="text-zinc-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+              title="Delete expense">
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            </button>
           )}
         </div>
       </div>
