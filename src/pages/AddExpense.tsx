@@ -1,8 +1,3 @@
-/**
- * Add an expense to a group.
- * v1.0: equal split only. Participants are selectable checkboxes.
- * Tags: pulled from group config, mandatory ones must be selected.
- */
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -27,7 +22,7 @@ export function AddExpense() {
   const [participants, setParticipants] = useState<Set<string>>(
     new Set(user ? [user.login] : [])
   )
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
+  const [selectedTag, setSelectedTag] = useState<string>('')
 
   const { data: members, isLoading: membersLoading } = useQuery({
     queryKey: ['members', owner, repo],
@@ -42,8 +37,6 @@ export function AddExpense() {
   })
 
   const tags = configData?.config.tags ?? []
-  const mandatoryTags = tags.filter(t => t.mandatory).map(t => t.name)
-  const missingMandatory = mandatoryTags.filter(t => !selectedTags.has(t))
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -54,7 +47,7 @@ export function AddExpense() {
         paidBy,
         participants: Array.from(participants),
         splitType: 'equal',
-        tags: Array.from(selectedTags)
+        tags: selectedTag ? [selectedTag] : []
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events', owner, repo] })
@@ -64,31 +57,19 @@ export function AddExpense() {
 
   const parsedAmount = parseFloat(amount)
   const perPerson = participants.size > 0 && !isNaN(parsedAmount)
-    ? parsedAmount / participants.size
-    : 0
+    ? parsedAmount / participants.size : 0
 
   const isValid =
     description.trim().length > 0 &&
-    !isNaN(parsedAmount) &&
-    parsedAmount > 0 &&
-    paidBy !== '' &&
-    participants.size > 0 &&
-    missingMandatory.length === 0
+    !isNaN(parsedAmount) && parsedAmount > 0 &&
+    paidBy !== '' && participants.size > 0 &&
+    (tags.length === 0 || selectedTag !== '')
 
   function toggleParticipant(login: string) {
     setParticipants(prev => {
       const next = new Set(prev)
       if (next.has(login)) next.delete(login)
       else next.add(login)
-      return next
-    })
-  }
-
-  function toggleTag(name: string) {
-    setSelectedTags(prev => {
-      const next = new Set(prev)
-      if (next.has(name)) next.delete(name)
-      else next.add(name)
       return next
     })
   }
@@ -129,24 +110,22 @@ export function AddExpense() {
           </div>
         </div>
 
-        {/* Tags */}
+        {/* Tag — single required selection */}
         {tags.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-zinc-700 mb-1.5">
-              Tags
-              {mandatoryTags.length > 0 && (
-                <span className="ml-1 text-xs text-red-500">({mandatoryTags.join(', ')} required)</span>
-              )}
+              Tag <span className="text-red-400 text-xs">required</span>
             </label>
             <div className="flex flex-wrap gap-2">
               {tags.map(tag => {
-                const selected = selectedTags.has(tag.name)
+                const selected = selectedTag === tag.name
                 return (
-                  <button key={tag.name} type="button" onClick={() => toggleTag(tag.name)}
+                  <button key={tag.name} type="button"
+                    onClick={() => setSelectedTag(selected ? '' : tag.name)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all
                       ${selected ? 'border-transparent text-white' : 'border-zinc-300 text-zinc-600 hover:border-zinc-400 bg-white'}`}
                     style={selected ? { backgroundColor: tag.color } : {}}>
-                    {tag.mandatory && !selected && <span className="text-red-400 text-xs">*</span>}
+                    {tag.emoji && <span>{tag.emoji}</span>}
                     {tag.name}
                     {selected && (
                       <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
@@ -157,9 +136,6 @@ export function AddExpense() {
                 )
               })}
             </div>
-            {missingMandatory.length > 0 && (
-              <p className="text-xs text-red-500 mt-1.5">Please select: {missingMandatory.join(', ')}</p>
-            )}
           </div>
         )}
 
@@ -214,7 +190,7 @@ export function AddExpense() {
             <span className="font-medium text-zinc-900">{formatAmount(parsedAmount, currency)}</span>
             {' '}for {participants.size} people. Each owes{' '}
             <span className="font-medium text-emerald-600">{formatAmount(perPerson, currency)}</span>.
-            {selectedTags.size > 0 && <span className="ml-1">Tagged: {Array.from(selectedTags).join(', ')}.</span>}
+            {selectedTag && <span className="ml-1">Tagged: {selectedTag}.</span>}
           </div>
         )}
 

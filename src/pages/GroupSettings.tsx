@@ -1,6 +1,7 @@
 /**
  * Group Settings — manage tags for a group.
  * Only the repo owner can access this page.
+ * Each transaction requires exactly one tag.
  */
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -10,6 +11,13 @@ import { getGroupConfig, saveGroupConfig } from '../lib/github'
 import { invalidateCachedConfig } from '../lib/cache'
 import { Spinner } from '../components/Spinner'
 import type { TagConfig } from '../types'
+
+const PRESET_EMOJIS = [
+  '🍔', '🍕', '☕', '🍺', '🛒',   // food & drink
+  '🚗', '✈️', '🚆', '⛽', '🛵',   // transport
+  '🏨', '🏠', '🎬', '🎮', '🎵',   // stay & fun
+  '💊', '🛍️', '📦', '💡', '🧾',  // misc
+]
 
 const PRESET_COLORS = [
   '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6',
@@ -24,7 +32,7 @@ export function GroupSettings() {
 
   const [newTagName, setNewTagName] = useState('')
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]!)
-  const [newTagMandatory, setNewTagMandatory] = useState(false)
+  const [newTagEmoji, setNewTagEmoji] = useState('')
 
   const { data: configData, isLoading } = useQuery({
     queryKey: ['config', owner, repo],
@@ -50,24 +58,20 @@ export function GroupSettings() {
 
   function addTag() {
     if (!newTagName.trim()) return
-    const updated = [...tags, {
+    const updated: TagConfig[] = [...tags, {
       name: newTagName.trim(),
       color: newTagColor,
-      mandatory: newTagMandatory
+      emoji: newTagEmoji || undefined,
+      mandatory: false
     }]
     saveMutation.mutate(updated)
     setNewTagName('')
-    setNewTagMandatory(false)
+    setNewTagColor(PRESET_COLORS[0]!)
+    setNewTagEmoji('')
   }
 
   function removeTag(name: string) {
     saveMutation.mutate(tags.filter(t => t.name !== name))
-  }
-
-  function toggleMandatory(name: string) {
-    saveMutation.mutate(tags.map(t =>
-      t.name === name ? { ...t, mandatory: !t.mandatory } : t
-    ))
   }
 
   if (!isOwner) {
@@ -96,6 +100,12 @@ export function GroupSettings() {
 
       {isLoading ? <Spinner className="py-12" /> : (
         <div className="space-y-6">
+
+          {/* Info banner */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
+            Every expense requires exactly one tag. Add the categories you want members to choose from.
+          </div>
+
           {/* Existing tags */}
           <div>
             <h2 className="text-sm font-semibold text-zinc-700 mb-3">
@@ -112,21 +122,8 @@ export function GroupSettings() {
                   <div key={tag.name}
                     className="flex items-center gap-3 bg-white border border-zinc-200 rounded-xl px-4 py-3">
                     <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                    {tag.emoji && <span className="text-base">{tag.emoji}</span>}
                     <span className="flex-1 font-medium text-zinc-800 text-sm">{tag.name}</span>
-
-                    {/* Mandatory toggle */}
-                    <button
-                      onClick={() => toggleMandatory(tag.name)}
-                      disabled={saveMutation.isPending}
-                      className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors
-                        ${tag.mandatory
-                          ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                          : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
-                        }`}>
-                      {tag.mandatory ? 'Required' : 'Optional'}
-                    </button>
-
-                    {/* Remove */}
                     <button
                       onClick={() => removeTag(tag.name)}
                       disabled={saveMutation.isPending}
@@ -152,8 +149,31 @@ export function GroupSettings() {
                 value={newTagName}
                 onChange={e => setNewTagName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addTag()}
-                placeholder="e.g. Food, Transport, Accommodation"
+                placeholder="e.g. Food, Transport, Hotel"
                 className="w-full border border-zinc-300 rounded-xl px-4 py-2.5 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm bg-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-600 mb-2">
+                Emoji <span className="text-zinc-400 font-normal">(optional)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {PRESET_EMOJIS.map(e => (
+                  <button key={e} type="button" onClick={() => setNewTagEmoji(newTagEmoji === e ? '' : e)}
+                    className={`w-9 h-9 text-lg rounded-xl transition-all flex items-center justify-center
+                      ${newTagEmoji === e ? 'bg-emerald-100 ring-2 ring-emerald-400' : 'bg-zinc-100 hover:bg-zinc-200'}`}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={newTagEmoji}
+                onChange={e => setNewTagEmoji(e.target.value)}
+                placeholder="Or type any emoji…"
+                maxLength={4}
+                className="w-full border border-zinc-300 rounded-xl px-3 py-2 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm bg-white"
               />
             </div>
 
@@ -169,17 +189,6 @@ export function GroupSettings() {
                   />
                 ))}
               </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setNewTagMandatory(!newTagMandatory)}
-                className={`w-10 h-6 rounded-full transition-colors relative ${newTagMandatory ? 'bg-emerald-500' : 'bg-zinc-300'}`}>
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${newTagMandatory ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
-              <span className="text-sm text-zinc-700">
-                Mandatory <span className="text-zinc-400 text-xs">(required on every expense)</span>
-              </span>
             </div>
 
             {saveMutation.error && (

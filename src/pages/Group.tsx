@@ -295,6 +295,7 @@ function EventRow({
     month: 'short', day: 'numeric'
   })
   const tagColorMap = new Map(tags.map((t, i) => [t.name, t.color || ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6'][i % 5]]))
+  const tagEmojiMap = new Map(tags.filter(t => t.emoji).map(t => [t.name, t.emoji!]))
 
   if (event.type === 'EXPENSE') {
     const e = event as Expense
@@ -315,6 +316,7 @@ function EventRow({
             {(e.tags ?? []).map(tag => (
               <span key={tag} className="text-xs px-1.5 py-0.5 rounded-full font-medium"
                 style={{ backgroundColor: (tagColorMap.get(tag) ?? '#94a3b8') + '25', color: tagColorMap.get(tag) ?? '#94a3b8' }}>
+                {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
                 {tag}
               </span>
             ))}

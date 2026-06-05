@@ -187,12 +187,18 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
     })
   }, [events, range])
 
-  // Build tag color map
+  // Build tag color + emoji maps
   const tagColorMap = useMemo(() => {
     const map = new Map<string, string>()
     tags.forEach((t, i) => {
       map.set(t.name, t.color || TAG_COLORS[i % TAG_COLORS.length]!)
     })
+    return map
+  }, [tags])
+
+  const tagEmojiMap = useMemo(() => {
+    const map = new Map<string, string>()
+    tags.forEach(t => { if (t.emoji) map.set(t.name, t.emoji) })
     return map
   }, [tags])
 
@@ -298,6 +304,9 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
                     className="w-3 h-3 rounded-full shrink-0"
                     style={{ backgroundColor: slice.color }}
                   />
+                  {tagEmojiMap.get(slice.label) && (
+                    <span className="text-base">{tagEmojiMap.get(slice.label)}</span>
+                  )}
                   <span className="text-sm text-zinc-800 flex-1 font-medium">{slice.label}</span>
                   <span className="text-xs text-zinc-400 mr-2">{slice.percentage.toFixed(1)}%</span>
                   <span className="text-sm font-semibold text-zinc-900">
@@ -334,6 +343,7 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
                               color: tagColorMap.get(tag) ?? UNTAGGED_COLOR
                             }}
                           >
+                            {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
                             {tag}
                           </span>
                         ))}

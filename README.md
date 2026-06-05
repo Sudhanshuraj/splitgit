@@ -1,43 +1,55 @@
 # ⑂ SplitGit
 
-> Expense splitting powered entirely by GitHub. No servers, no database, no DevOps.
+> Split expenses with friends. Your data stays in your GitHub account — no third-party servers, no subscriptions, no ads.
 
-SplitGit is a PWA (installable on iPhone, Android, and desktop) that lets you split expenses with friends — like Splitwise, but your data lives in private GitHub repositories that you own.
-
-**Live app → [sudhanshuraj.github.io/splitgit](https://sudhanshuraj.github.io/splitgit)**
+**→ [Open SplitGit](https://sudhanshuraj.github.io/splitgit)**
 
 ---
 
-## How it works
+# For Users
 
-Every concept maps 1:1 to GitHub:
+## What is it?
 
-| GitHub | SplitGit |
-|---|---|
-| Repository | Expense Group |
-| Collaborator | Group Member |
-| File Commit | Add Expense / Settlement |
-| Commit History | Audit Trail |
-| Repo Invite | Add Member to Group |
-| GitHub OAuth | App Login |
+SplitGit is a free expense-splitting app (like Splitwise) that you log into with your existing GitHub account. Every expense is stored as a commit in a private repository that only you and your group members can see — no third-party database, no subscription, no ads.
 
-Each group is a **private GitHub repo**. Inside it lives one file — `expenses.json` — an append-only log of every expense and settlement. Balances are always derived by replaying this log. Nothing is ever deleted or modified, only appended.
+## Getting started
 
----
+1. Open the app at [sudhanshuraj.github.io/splitgit](https://sudhanshuraj.github.io/splitgit)
+2. Click **Continue with GitHub** and authorize the app
+3. Tap **New Group** and give it a name (e.g. "Goa Trip", "Flatmates")
+4. **Invite members** by their GitHub username
+5. Start adding expenses
 
 ## Features
 
-- **GitHub OAuth login** — no new account needed
-- **Create expense groups** — each becomes a private repo
-- **Add expenses** — equal split, recorded as a git commit forever
-- **View balances** — computed live from the event log
-- **Settle up** — record settlements, clear debts
-- **Cross-group simplification** — owes B in one group, C owes you in another? The app finds the minimum transactions to clear everything across all groups
-- **Installable PWA** — add to home screen on iPhone or Android
-- **Tamper-evident** — every event has a SHA-256 hash; edits are detectable
-- **Offline-ready** — queue expenses when offline, sync when back online
+**Expenses**
+- Add an expense, pick who paid, split equally among any subset of the group
+- Tag expenses (Food, Transport, Hotel, etc.) — tags are configurable per group, and you can make certain tags mandatory
+- Edit any expense — the original is preserved in history, corrections are linked to it
+
+**Balances & Settling**
+- See who owes whom at a glance
+- Record a settlement when someone pays back
+- Cross-group simplification: if you share debts across multiple groups, SplitGit finds the minimum number of payments to clear everything globally
+
+**Analytics**
+- Pie chart of spend by category
+- Filter by This Month / Last Month / This Year / Custom date range
+
+**Offline & installable**
+- Add expenses without internet — they sync automatically when you reconnect
+- iPhone: tap Share → Add to Home Screen
+- Android: tap the install prompt in Chrome
+
+## Your data
+
+Every group is a **private GitHub repository** in your own account. Expenses are stored as commits — you can browse the full history directly on GitHub at any time. Nothing is stored on any server other than GitHub.
+
+The only requirement is a free GitHub account.
 
 ---
+
+# For Developers
 
 ## Architecture
 
@@ -57,9 +69,7 @@ Each group is a **private GitHub repo**. Inside it lives one file — `expenses.
 
 The Cloudflare Worker is the only non-GitHub piece. It does exactly one thing: exchange the OAuth `code` for an access token so the client secret never touches the browser.
 
----
-
-## Tech Stack
+## Tech stack
 
 | Layer | Choice |
 |---|---|
@@ -70,16 +80,14 @@ The Cloudflare Worker is the only non-GitHub piece. It does exactly one thing: e
 | GitHub API | Octokit.js |
 | Data fetching | TanStack Query v5 |
 | State | Zustand |
-| Offline storage | IndexedDB (idb) |
-| PWA | Vite PWA Plugin |
+| Offline cache | IndexedDB (idb) |
+| PWA | vite-plugin-pwa |
 | Hosting | GitHub Pages |
 | Auth backend | Cloudflare Worker |
 
----
-
 ## Running locally
 
-**Prerequisites:** Node 22+, a GitHub OAuth App, a Cloudflare Worker
+Prerequisites: Node 22+, a GitHub OAuth App, a Cloudflare Worker
 
 ```bash
 git clone https://github.com/Sudhanshuraj/splitgit.git
@@ -99,18 +107,15 @@ npm run dev
 # → http://localhost:5173
 ```
 
----
-
 ## Deploying your own instance
 
-### 1. GitHub OAuth App
+**1. GitHub OAuth App**
 
 Go to [github.com/settings/developers](https://github.com/settings/developers) → New OAuth App:
-
 - Homepage URL: `https://YOUR_USERNAME.github.io/splitgit`
 - Callback URL: `https://YOUR_USERNAME.github.io/splitgit/auth/callback`
 
-### 2. Cloudflare Worker
+**2. Cloudflare Worker**
 
 ```bash
 cd worker
@@ -120,20 +125,17 @@ wrangler secret put GITHUB_CLIENT_SECRET
 wrangler deploy
 ```
 
-### 3. GitHub repo secrets
+**3. GitHub repo secrets**
 
-Go to your repo → Settings → Secrets and variables → Actions:
-
+Repo → Settings → Secrets and variables → Actions:
 - `VITE_GITHUB_CLIENT_ID` — your OAuth App client ID
 - `VITE_OAUTH_WORKER_URL` — your Cloudflare Worker URL
 
-### 4. Enable GitHub Pages
+**4. Enable GitHub Pages**
 
 Repo → Settings → Pages → Source: **GitHub Actions**
 
 Every push to `main` auto-deploys via the included workflow.
-
----
 
 ## Project structure
 
@@ -141,48 +143,34 @@ Every push to `main` auto-deploys via the included workflow.
 splitgit/
   src/
     pages/
-      Home.tsx          ← login
-      Groups.tsx        ← all groups
-      Group.tsx         ← single group detail + history
-      AddExpense.tsx    ← add expense form
-      Settle.tsx        ← per-group settle
-      GlobalSettle.tsx  ← cross-group simplified settle
+      Home.tsx            ← login
+      Groups.tsx          ← all groups
+      Group.tsx           ← single group: balances, history, analytics
+      AddExpense.tsx      ← add expense form
+      EditExpense.tsx     ← edit expense (append-only correction commit)
+      Settle.tsx          ← per-group settle
+      GlobalSettle.tsx    ← cross-group simplified settle
+      GroupSettings.tsx   ← tag management (owner only)
+    components/
+      Analytics.tsx       ← SVG pie chart + time range selector
     lib/
-      github.ts         ← GitHub API wrapper
-      eventLog.ts       ← read/write expenses.json
-      balances.ts       ← compute balances + cross-group simplification
-      hash.ts           ← SHA-256 tamper detection
-      offline.ts        ← IndexedDB offline queue
+      github.ts           ← GitHub API wrapper
+      eventLog.ts         ← read/write expenses.json (with IndexedDB cache)
+      balances.ts         ← compute balances + cross-group simplification
+      cache.ts            ← IndexedDB persistent cache
+      hash.ts             ← SHA-256 tamper detection
+      offline.ts          ← offline queue
     store/
-      auth.ts           ← Zustand auth store
+      auth.ts             ← Zustand auth store
     types/
-      index.ts          ← all TypeScript types
+      index.ts            ← all TypeScript types
   worker/
-    index.js            ← Cloudflare Worker (OAuth exchange)
-    wrangler.toml       ← Worker config
+    index.js              ← Cloudflare Worker (OAuth exchange, ~50 lines)
+    wrangler.toml         ← Worker config
   .github/
     workflows/
-      deploy.yml        ← auto-deploy to GitHub Pages
+      deploy.yml          ← auto-deploy to GitHub Pages
 ```
-
----
-
-## Roadmap
-
-- [x] GitHub OAuth login
-- [x] Create groups / invite members
-- [x] Add expenses (equal split)
-- [x] View balances
-- [x] Settle up
-- [x] Cross-group simplification
-- [x] Installable PWA
-- [ ] Exact + percentage splits
-- [ ] Offline expense creation + background sync
-- [ ] Tamper detection UI
-- [ ] Push notifications for new expenses
-- [ ] Multi-currency conversion
-
----
 
 ## License
 

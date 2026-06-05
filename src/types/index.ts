@@ -85,7 +85,8 @@ export interface AuthUser {
 export interface TagConfig {
   name: string        // e.g. "Food", "Transport"
   color: string       // hex color for display e.g. "#10b981"
-  mandatory: boolean  // if true, every expense must have this tag
+  emoji?: string      // optional emoji prefix e.g. "🍔"
+  mandatory: boolean  // kept for backward compat, no longer used in UI
 }
 
 export interface GroupConfig {
