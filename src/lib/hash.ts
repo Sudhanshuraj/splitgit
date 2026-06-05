@@ -26,6 +26,7 @@ export async function hashExpense(e: HashableExpense): Promise<string> {
     paidBy: e.paidBy,
     splits: e.splits.slice().sort((a, b) => a.username.localeCompare(b.username)),
     splitType: e.splitType,
+    tags: e.tags.slice().sort(),
     createdAt: e.createdAt
   })
   return sha256(canonical)

@@ -8,9 +8,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { readEvents } from '../lib/eventLog'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
-import { listMembers, inviteMember } from '../lib/github'
+import { listMembers, inviteMember, getGroupConfig } from '../lib/github'
 import { Spinner } from '../components/Spinner'
-import type { Event, Expense, Settlement } from '../types'
+import { Analytics } from '../components/Analytics'
+import type { Event, Expense, Settlement, TagConfig } from '../types'
 
 export function Group() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>()
@@ -19,7 +20,7 @@ export function Group() {
   const qc = useQueryClient()
   const [showInvite, setShowInvite] = useState(false)
   const [inviteUsername, setInviteUsername] = useState('')
-  const [activeTab, setActiveTab] = useState<'balances' | 'history'>('balances')
+  const [activeTab, setActiveTab] = useState<'balances' | 'history' | 'analytics'>('balances')
 
   const { data: eventData, isLoading: eventsLoading } = useQuery({
     queryKey: ['events', owner, repo],
@@ -27,6 +28,13 @@ export function Group() {
     enabled: !!octokit && !!owner && !!repo,
     staleTime: 10_000,
     refetchOnWindowFocus: true
+  })
+
+  const { data: configData } = useQuery({
+    queryKey: ['config', owner, repo],
+    queryFn: () => getGroupConfig(octokit!, owner!, repo!),
+    enabled: !!octokit && !!owner && !!repo,
+    staleTime: 60_000
   })
 
   const { data: members } = useQuery({
@@ -72,12 +80,20 @@ export function Group() {
           <h1 className="text-xl font-bold text-zinc-900 truncate">{repo}</h1>
           <p className="text-xs text-zinc-400">@{owner}</p>
         </div>
-        <Link
-          to={`/groups/${owner}/${repo}/add`}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shrink-0"
-        >
-          + Add
-        </Link>
+        <div className="flex items-center gap-2">
+          {isOwner && (
+            <Link to={`/groups/${owner}/${repo}/settings`}
+              className="text-zinc-400 hover:text-zinc-700 p-1.5 rounded-lg hover:bg-zinc-100 transition-colors">
+              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+              </svg>
+            </Link>
+          )}
+          <Link to={`/groups/${owner}/${repo}/add`}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shrink-0">
+            + Add
+          </Link>
+        </div>
       </div>
 
       {/* Members strip */}
@@ -144,7 +160,7 @@ export function Group() {
 
       {/* Tabs */}
       <div className="flex bg-zinc-100 rounded-xl p-1 mb-4">
-        {(['balances', 'history'] as const).map(tab => (
+        {(['balances', 'history', 'analytics'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -215,10 +231,19 @@ export function Group() {
             </div>
           ) : (
             [...events].reverse().map(event => (
-              <EventRow key={event.id} event={event} />
+              <EventRow key={event.id} event={event} tags={configData?.config.tags ?? []} />
             ))
           )}
         </div>
+      )}
+
+      {/* Analytics tab */}
+      {!eventsLoading && activeTab === 'analytics' && (
+        <Analytics
+          events={events}
+          tags={configData?.config.tags ?? []}
+          currency={defaultCurrency}
+        />
       )}
     </div>
   )
@@ -231,10 +256,11 @@ function MemberAvatar({ login, members }: { login: string; members: { login: str
     : <div className="w-9 h-9 rounded-full bg-zinc-200 flex items-center justify-center text-zinc-500 text-xs font-bold border-2 border-zinc-300">{login[0]?.toUpperCase()}</div>
 }
 
-function EventRow({ event }: { event: Event }) {
+function EventRow({ event, tags }: { event: Event; tags: TagConfig[] }) {
   const date = new Date(event.createdAt).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric'
   })
+  const tagColorMap = new Map(tags.map((t, i) => [t.name, t.color || ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6'][i % 5]]))
 
   if (event.type === 'EXPENSE') {
     const e = event as Expense
@@ -243,7 +269,15 @@ function EventRow({ event }: { event: Event }) {
         <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-lg shrink-0">💸</div>
         <div className="flex-1 min-w-0">
           <p className="font-medium text-zinc-900 truncate">{e.description}</p>
-          <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {date}</p>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {date}</p>
+            {(e.tags ?? []).map(tag => (
+              <span key={tag} className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                style={{ backgroundColor: (tagColorMap.get(tag) ?? '#94a3b8') + '25', color: tagColorMap.get(tag) ?? '#94a3b8' }}>
+                {tag}
+              </span>
+            ))}
+          </div>
         </div>
         <p className="font-semibold text-zinc-900 shrink-0">{formatAmount(e.amount, e.currency)}</p>
       </div>

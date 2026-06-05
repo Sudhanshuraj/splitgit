@@ -14,6 +14,8 @@ export interface Expense {
   paidBy: string       // GitHub username
   splits: Split[]      // must sum to amount
   splitType: 'equal' | 'exact' | 'percentage'
+  tags: string[]       // user-defined tags e.g. ['food', 'transport']
+  supersedesId?: string // if set, this is a correction of the original event
   createdAt: string    // ISO 8601
   hash: string         // SHA-256 of all fields (tamper detection)
 }
@@ -76,6 +78,24 @@ export interface AuthUser {
   name: string | null
   avatarUrl: string
   token: string
+}
+
+// ─── Group config (stored in config.json in the repo) ────────────────────────
+
+export interface TagConfig {
+  name: string        // e.g. "Food", "Transport"
+  color: string       // hex color for display e.g. "#10b981"
+  mandatory: boolean  // if true, every expense must have this tag
+}
+
+export interface GroupConfig {
+  version: 1
+  tags: TagConfig[]
+}
+
+export const DEFAULT_GROUP_CONFIG: GroupConfig = {
+  version: 1,
+  tags: []
 }
 
 // ─── Offline queue ────────────────────────────────────────────────────────────

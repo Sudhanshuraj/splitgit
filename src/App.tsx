@@ -8,6 +8,7 @@ import { Group } from './pages/Group'
 import { AddExpense } from './pages/AddExpense'
 import { Settle } from './pages/Settle'
 import { GlobalSettle } from './pages/GlobalSettle'
+import { GroupSettings } from './pages/GroupSettings'
 import { getQueuedEvents, removeQueuedEvent, isOnline, onOnline } from './lib/offline'
 import { addExpense, addSettlement } from './lib/eventLog'
 import type { Expense, Settlement } from './types'
@@ -40,7 +41,8 @@ export function App() {
               currency: e.currency,
               paidBy: e.paidBy,
               participants: e.splits.map(s => s.username),
-              splitType: 'equal'
+              splitType: 'equal',
+              tags: e.tags ?? []
             })
           } else {
             const s = item.event as Settlement
@@ -108,6 +110,16 @@ export function App() {
         element={
           <RequireAuth>
             <Layout><Settle /></Layout>
+          </RequireAuth>
+        }
+      />
+
+      {/* Group settings */}
+      <Route
+        path="/groups/:owner/:repo/settings"
+        element={
+          <RequireAuth>
+            <Layout><GroupSettings /></Layout>
           </RequireAuth>
         }
       />

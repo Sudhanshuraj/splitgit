@@ -4,7 +4,8 @@
  */
 
 import { Octokit } from 'octokit'
-import type { Group, Member } from '../types'
+import type { Group, Member, GroupConfig } from '../types'
+import { DEFAULT_GROUP_CONFIG } from '../types'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ export const GITHUB_OAUTH_CONFIG = {
 
 export const SPLITGIT_REPO_TOPIC = 'splitgit-group'
 const EXPENSES_FILE_PATH = 'expenses.json'
+const CONFIG_FILE_PATH = 'config.json'
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -224,4 +226,50 @@ export async function updateExpensesFile(
     content: btoa(content),
     sha
   })
+}
+
+// ─── Group config (config.json) ───────────────────────────────────────────────
+
+export interface ConfigFileResult {
+  config: GroupConfig
+  sha: string | null   // null if file doesn't exist yet
+}
+
+export async function getGroupConfig(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<ConfigFileResult> {
+  try {
+    const { data } = await octokit.rest.repos.getContent({ owner, repo, path: CONFIG_FILE_PATH })
+    if (Array.isArray(data) || data.type !== 'file') {
+      return { config: DEFAULT_GROUP_CONFIG, sha: null }
+    }
+    const config = JSON.parse(atob(data.content.replace(/\n/g, ''))) as GroupConfig
+    return { config, sha: data.sha }
+  } catch {
+    // File doesn't exist yet — return defaults
+    return { config: DEFAULT_GROUP_CONFIG, sha: null }
+  }
+}
+
+export async function saveGroupConfig(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  config: GroupConfig,
+  existingSha: string | null
+): Promise<string> {
+  const params: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
+    owner,
+    repo,
+    path: CONFIG_FILE_PATH,
+    message: 'config: update group tags',
+    content: btoa(JSON.stringify(config, null, 2))
+  }
+  if (existingSha) {
+    (params as Record<string, unknown>).sha = existingSha
+  }
+  const { data } = await octokit.rest.repos.createOrUpdateFileContents(params)
+  return (data.content as { sha: string }).sha
 }
