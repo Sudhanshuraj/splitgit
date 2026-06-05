@@ -40,8 +40,10 @@ export async function exchangeCodeForToken(code: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code })
   })
-  if (!res.ok) throw new Error('Token exchange failed')
-  const data = await res.json() as { access_token: string }
+  const data = await res.json() as { access_token?: string; error?: string }
+  if (!res.ok || data.error || !data.access_token) {
+    throw new Error(data.error ?? 'Token exchange failed')
+  }
   return data.access_token
 }
 
