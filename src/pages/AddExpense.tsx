@@ -7,7 +7,7 @@ import { listMembers, getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
 import { Spinner } from '../components/Spinner'
 
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'SGD', 'JPY']
+const CURRENCY = 'INR'
 
 export function AddExpense() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>()
@@ -17,7 +17,7 @@ export function AddExpense() {
 
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
-  const [currency, setCurrency] = useState('INR')
+  const currency = CURRENCY
   const [paidBy, setPaidBy] = useState(user?.login ?? '')
   const [participants, setParticipants] = useState<Set<string>>(
     new Set(user ? [user.login] : [])
@@ -97,17 +97,11 @@ export function AddExpense() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Amount</label>
-          <div className="flex gap-2">
-            <select value={currency} onChange={e => setCurrency(e.target.value)}
-              className="border border-zinc-300 rounded-xl px-3 py-3 text-zinc-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm">
-              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder="0.00" min="0.01" step="0.01"
-              className="flex-1 border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
-            />
-          </div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Amount (₹)</label>
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+            placeholder="0.00" min="0.01" step="0.01"
+            className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
+          />
         </div>
 
         {/* Tag — single required selection */}

@@ -10,7 +10,7 @@ import { addSettlement } from '../lib/eventLog'
 import { formatAmount } from '../lib/balances'
 import { Spinner } from '../components/Spinner'
 
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'SGD', 'JPY']
+const CURRENCY = 'INR'
 
 export function Settle() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>()
@@ -24,7 +24,7 @@ export function Settle() {
 
   const [to, setTo] = useState(prefill?.to ?? '')
   const [amount, setAmount] = useState(prefill?.amount?.toFixed(2) ?? '')
-  const [currency, setCurrency] = useState(prefill?.currency ?? 'USD')
+  const currency = CURRENCY
   const [note, setNote] = useState('')
 
   const parsedAmount = parseFloat(amount)
@@ -92,29 +92,16 @@ export function Settle() {
 
         {/* Amount */}
         <div>
-          <label className="block text-sm font-medium text-zinc-700 mb-1.5">
-            Amount
-          </label>
-          <div className="flex gap-2">
-            <select
-              value={currency}
-              onChange={e => setCurrency(e.target.value)}
-              className="border border-zinc-300 rounded-xl px-3 py-3 text-zinc-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-            >
-              {CURRENCIES.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <input
-              type="number"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              placeholder="0.00"
-              min="0.01"
-              step="0.01"
-              className="flex-1 border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
-            />
-          </div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Amount (₹)</label>
+          <input
+            type="number"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            placeholder="0.00"
+            min="0.01"
+            step="0.01"
+            className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
+          />
         </div>
 
         {/* Note */}

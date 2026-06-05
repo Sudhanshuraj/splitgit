@@ -77,18 +77,26 @@ export function Group() {
   ] as Event[]
 
   const balances = computeNetBalances(effectiveEvents)
-  const defaultCurrency = events.find(e => e.type === 'EXPENSE')
-    ? (events.find(e => e.type === 'EXPENSE') as Expense).currency
-    : 'USD'
+  // Use most recent expense's currency as default (not the oldest)
+  const lastExpense = [...events].reverse().find(e => e.type === 'EXPENSE') as Expense | undefined
+  const defaultCurrency = lastExpense?.currency ?? 'INR'
   const settlements = minimumTransactions(balances, defaultCurrency)
 
-  // Build set of expense IDs that have been superseded (have a newer version)
+  // IDs of expenses deleted via EXPENSE_DELETION events
+  const deletedExpenseIds = new Set(
+    events
+      .filter(e => e.type === 'EXPENSE_DELETION')
+      .map(e => (e as import('../types').ExpenseDeletion).deletedId)
+  )
+
+  // IDs of expenses superseded by an edit
   const supersededIds = new Set(
     events
       .filter(e => e.type === 'EXPENSE' && (e as Expense).supersedesId)
       .map(e => (e as Expense).supersedesId!)
   )
-  // Build set of IDs that ARE corrections (they supersede something)
+
+  // IDs of expenses that ARE a correction (have supersedesId set)
   const correctedIds = new Set(
     events
       .filter(e => e.type === 'EXPENSE' && (e as Expense).supersedesId)
@@ -296,8 +304,11 @@ export function Group() {
             </div>
           ) : (
             [...events].reverse()
-              // Hide superseded versions — they exist in git but not in the UI
-              .filter(e => !supersededIds.has(e.id))
+              .filter(e =>
+                e.type !== 'EXPENSE_DELETION' &&        // hide deletion tombstones
+                !supersededIds.has(e.id) &&             // hide superseded edits
+                !deletedExpenseIds.has(e.id)            // hide deleted expenses
+              )
               .map(event => (
                 <EventRow
                   key={event.id}
@@ -324,7 +335,7 @@ export function Group() {
       {/* Analytics tab */}
       {!eventsLoading && activeTab === 'analytics' && (
         <Analytics
-          events={events}
+          events={effectiveEvents}
           tags={configData?.config.tags ?? []}
           currency={defaultCurrency}
         />
