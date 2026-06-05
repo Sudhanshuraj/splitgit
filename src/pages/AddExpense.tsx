@@ -6,6 +6,7 @@ import { addExpense } from '../lib/eventLog'
 import { listMembers, getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
 import { Spinner } from '../components/Spinner'
+import { DatePicker } from '../components/DatePicker'
 
 const CURRENCY = 'INR'
 
@@ -23,6 +24,7 @@ export function AddExpense() {
     new Set(user ? [user.login] : [])
   )
   const [selectedTag, setSelectedTag] = useState<string>('')
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
 
   const { data: members, isLoading: membersLoading } = useQuery({
     queryKey: ['members', owner, repo],
@@ -47,7 +49,8 @@ export function AddExpense() {
         paidBy,
         participants: Array.from(participants),
         splitType: 'equal',
-        tags: selectedTag ? [selectedTag] : []
+        tags: selectedTag ? [selectedTag] : [],
+        date
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events', owner, repo] })
@@ -94,6 +97,11 @@ export function AddExpense() {
             className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
             autoFocus
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Date</label>
+          <DatePicker value={date} onChange={setDate} />
         </div>
 
         <div>

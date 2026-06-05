@@ -13,6 +13,7 @@ import { readEvents, editExpense } from '../lib/eventLog'
 import { listMembers, getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
 import { Spinner } from '../components/Spinner'
+import { DatePicker } from '../components/DatePicker'
 import type { Expense } from '../types'
 
 const CURRENCY = 'INR'
@@ -31,6 +32,7 @@ export function EditExpense() {
   const [paidBy, setPaidBy] = useState('')
   const [participants, setParticipants] = useState<Set<string>>(new Set())
   const [selectedTag, setSelectedTag] = useState<string>('')
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [loaded, setLoaded] = useState(false)
 
   // Load events to find the original expense
@@ -65,6 +67,7 @@ export function EditExpense() {
     setPaidBy(original.paidBy)
     setParticipants(new Set(original.splits.map(s => s.username)))
     setSelectedTag(original.tags?.[0] ?? '')
+    setDate(original.date ?? original.createdAt.slice(0, 10))
     setLoaded(true)
   }, [original, loaded])
 
@@ -79,7 +82,8 @@ export function EditExpense() {
         paidBy,
         participants: Array.from(participants),
         splitType: 'equal',
-        tags: selectedTag ? [selectedTag] : []
+        tags: selectedTag ? [selectedTag] : [],
+        date
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events', owner, repo] })
@@ -155,6 +159,11 @@ export function EditExpense() {
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">What was it for?</label>
           <input type="text" value={description} onChange={e => setDescription(e.target.value)}
             className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base" />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Date</label>
+          <DatePicker value={date} onChange={setDate} />
         </div>
 
         <div>

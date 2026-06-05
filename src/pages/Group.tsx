@@ -361,13 +361,19 @@ function EventRow({
   editUrl?: string
   onDelete?: () => void
 }) {
-  const date = new Date(event.createdAt).toLocaleDateString('en-US', {
+  const createdDate = new Date(event.createdAt).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric'
   })
   const tagEmojiMap = new Map(tags.filter(t => t.emoji).map(t => [t.name, t.emoji!]))
 
   if (event.type === 'EXPENSE') {
     const e = event as Expense
+    // Use the user-set transaction date if available; fall back to createdAt
+    const txDate = (() => {
+      const iso = e.date ?? e.createdAt.slice(0, 10)
+      const [y, m, d] = iso.split('-').map(Number)
+      return new Date(y!, m! - 1, d!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    })()
     return (
       <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
         <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-lg shrink-0">💸</div>
@@ -381,7 +387,7 @@ function EventRow({
             )}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {date}</p>
+            <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {txDate}</p>
             {(e.tags ?? []).map(tag => (
               <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
                 {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
@@ -422,7 +428,7 @@ function EventRow({
           <p className="font-medium text-zinc-900 text-sm">
             @{s.from} → @{s.to}
           </p>
-          <p className="text-xs text-zinc-400">Settlement · {date}</p>
+          <p className="text-xs text-zinc-400">Settlement · {createdDate}</p>
         </div>
         <p className="font-semibold text-emerald-600 shrink-0">{formatAmount(s.amount, s.currency)}</p>
       </div>

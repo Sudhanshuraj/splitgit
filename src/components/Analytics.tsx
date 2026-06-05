@@ -186,12 +186,14 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
     return getPresetRange(preset)
   }, [preset, customFrom, customTo])
 
-  // Filter expenses to range
+  // Filter expenses to range — use user-set date (e.date) with createdAt as fallback
   const expenses = useMemo(() => {
     const resolved = resolveExpenses(events)
     return resolved.filter(e => {
-      const d = new Date(e.createdAt)
-      return d >= range.from && d <= range.to
+      const iso = e.date ?? e.createdAt.slice(0, 10)
+      const [y, m, d] = iso.split('-').map(Number)
+      const txDate = new Date(y!, m! - 1, d!)
+      return txDate >= range.from && txDate <= range.to
     })
   }, [events, range])
 
@@ -321,7 +323,11 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
                       <p className="text-sm font-medium text-zinc-800 truncate">{e.description}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <p className="text-xs text-zinc-400">
-                          {new Date(e.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {(() => {
+                            const iso = e.date ?? e.createdAt.slice(0, 10)
+                            const [y, m, d] = iso.split('-').map(Number)
+                            return new Date(y!, m! - 1, d!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          })()}
                         </p>
                         {e.tags.map(tag => (
                           <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">

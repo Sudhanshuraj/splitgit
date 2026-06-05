@@ -8,7 +8,12 @@ import { Octokit } from 'octokit'
 import type { Event, Expense, Settlement, ExpenseDeletion } from '../types'
 import { getExpensesFile, updateExpensesFile } from './github'
 import { hashExpense, hashSettlement, hashDeletion } from './hash'
-import { getCachedEvents, setCachedEvents } from './cache'
+import { getCachedEvents, setCachedEvents, invalidateCachedEvents } from './cache'
+
+// Bust the event cache so the next readEvents() fetches fresh from GitHub
+async function invalidateCachedEventsForRetry(owner: string, repo: string): Promise<void> {
+  await invalidateCachedEvents(owner, repo)
+}
 import { v4 as uuidv4 } from 'uuid'
 
 // ─── Read with cache ──────────────────────────────────────────────────────────
@@ -53,9 +58,12 @@ async function appendEvent(
   owner: string,
   repo: string,
   newEvent: Event,
-  retries = 3
+  retries = 5
 ): Promise<void> {
   for (let attempt = 0; attempt < retries; attempt++) {
+    // Always fetch fresh from GitHub on retry so we get the latest SHA
+    if (attempt > 0) await invalidateCachedEventsForRetry(owner, repo)
+
     const { events, sha } = await readEvents(octokit, owner, repo)
     const updated = [...events, newEvent]
     try {
@@ -69,8 +77,11 @@ async function appendEvent(
       await setCachedEvents(owner, repo, sha, updated)
       return
     } catch (err: unknown) {
-      const isConflict = err instanceof Error && err.message.includes('409')
-      if (!isConflict || attempt === retries - 1) throw err
+      // GitHub returns 409 for ref conflicts and 422 for SHA mismatches — both are retryable
+      const msg = err instanceof Error ? err.message : ''
+      const isRetryable = msg.includes('409') || msg.includes('422') || msg.includes('does not match')
+      if (!isRetryable || attempt === retries - 1) throw err
+      // Back off before retrying: 500ms, 1s, 1.5s, 2s
       await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
     }
   }
@@ -113,7 +124,8 @@ export async function editExpense(
     splits,
     splitType: input.splitType,
     tags: input.tags,
-    supersedesId: originalId,  // links back to the original event in git history
+    date: input.date,
+    supersedesId: originalId,
     createdAt
   }
 
@@ -134,6 +146,7 @@ export interface CreateExpenseInput {
   participants: string[]
   splitType: 'equal'
   tags: string[]
+  date: string  // YYYY-MM-DD
 }
 
 export async function addExpense(
@@ -164,6 +177,7 @@ export async function addExpense(
     splits,
     splitType: input.splitType,
     tags: input.tags,
+    date: input.date,
     createdAt
   }
 

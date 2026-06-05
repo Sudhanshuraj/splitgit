@@ -43,7 +43,8 @@ export function App() {
               paidBy: e.paidBy,
               participants: e.splits.map(s => s.username),
               splitType: 'equal',
-              tags: e.tags ?? []
+              tags: e.tags ?? [],
+              date: e.date ?? e.createdAt.slice(0, 10)
             })
           } else {
             const s = item.event as Settlement

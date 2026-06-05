@@ -15,8 +15,9 @@ export interface Expense {
   splits: Split[]      // must sum to amount
   splitType: 'equal' | 'exact' | 'percentage'
   tags: string[]       // user-defined tags e.g. ['food', 'transport']
+  date: string         // YYYY-MM-DD — the actual expense date (user-set, defaults to today)
   supersedesId?: string // if set, this is a correction of the original event
-  createdAt: string    // ISO 8601
+  createdAt: string    // ISO 8601 — when the record was written (audit only)
   hash: string         // SHA-256 of all fields (tamper detection)
 }
 
