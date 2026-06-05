@@ -3,8 +3,8 @@ main = "index.js"
 compatibility_date = "2024-01-01"
 
 [vars]
-GITHUB_CLIENT_ID = "your_github_oauth_app_client_id"
-ALLOWED_ORIGIN = "https://your-splitgit-domain.com"
+GITHUB_CLIENT_ID = "Ov23liAysWY3lf9nwtB2"
+ALLOWED_ORIGIN = "https://sudhanshuraj.github.io"
 
 # GITHUB_CLIENT_SECRET must be set as a secret (never in plaintext):
 #   wrangler secret put GITHUB_CLIENT_SECRET
