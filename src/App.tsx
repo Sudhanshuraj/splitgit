@@ -9,6 +9,7 @@ import { AddExpense } from './pages/AddExpense'
 import { Settle } from './pages/Settle'
 import { GlobalSettle } from './pages/GlobalSettle'
 import { GroupSettings } from './pages/GroupSettings'
+import { EditExpense } from './pages/EditExpense'
 import { getQueuedEvents, removeQueuedEvent, isOnline, onOnline } from './lib/offline'
 import { addExpense, addSettlement } from './lib/eventLog'
 import type { Expense, Settlement } from './types'
@@ -110,6 +111,16 @@ export function App() {
         element={
           <RequireAuth>
             <Layout><Settle /></Layout>
+          </RequireAuth>
+        }
+      />
+
+      {/* Edit expense */}
+      <Route
+        path="/groups/:owner/:repo/edit/:expenseId"
+        element={
+          <RequireAuth>
+            <Layout><EditExpense /></Layout>
           </RequireAuth>
         }
       />

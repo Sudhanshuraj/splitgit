@@ -65,6 +65,19 @@ export function Group() {
     : 'USD'
   const settlements = minimumTransactions(balances, defaultCurrency)
 
+  // Build set of expense IDs that have been superseded (have a newer version)
+  const supersededIds = new Set(
+    events
+      .filter(e => e.type === 'EXPENSE' && (e as Expense).supersedesId)
+      .map(e => (e as Expense).supersedesId!)
+  )
+  // Build set of IDs that ARE corrections (they supersede something)
+  const correctedIds = new Set(
+    events
+      .filter(e => e.type === 'EXPENSE' && (e as Expense).supersedesId)
+      .map(e => e.id)
+  )
+
   const isOwner = owner === user?.login
 
   return (
@@ -222,7 +235,7 @@ export function Group() {
         </div>
       )}
 
-      {/* History tab */}
+      {/* History tab — shows all events; superseded expenses are hidden (greyed) */}
       {!eventsLoading && activeTab === 'history' && (
         <div className="space-y-2">
           {events.length === 0 ? (
@@ -230,9 +243,22 @@ export function Group() {
               <p className="text-sm">No events yet.</p>
             </div>
           ) : (
-            [...events].reverse().map(event => (
-              <EventRow key={event.id} event={event} tags={configData?.config.tags ?? []} />
-            ))
+            [...events].reverse()
+              // Hide superseded versions — they exist in git but not in the UI
+              .filter(e => !supersededIds.has(e.id))
+              .map(event => (
+                <EventRow
+                  key={event.id}
+                  event={event}
+                  tags={configData?.config.tags ?? []}
+                  isEdited={correctedIds.has(event.id)}
+                  canEdit={
+                    event.type === 'EXPENSE' &&
+                    (user?.login === (event as Expense).paidBy || user?.login === owner)
+                  }
+                  editUrl={`/groups/${owner}/${repo}/edit/${event.id}`}
+                />
+              ))
           )}
         </div>
       )}
@@ -256,7 +282,15 @@ function MemberAvatar({ login, members }: { login: string; members: { login: str
     : <div className="w-9 h-9 rounded-full bg-zinc-200 flex items-center justify-center text-zinc-500 text-xs font-bold border-2 border-zinc-300">{login[0]?.toUpperCase()}</div>
 }
 
-function EventRow({ event, tags }: { event: Event; tags: TagConfig[] }) {
+function EventRow({
+  event, tags, isEdited = false, canEdit = false, editUrl = ''
+}: {
+  event: Event
+  tags: TagConfig[]
+  isEdited?: boolean
+  canEdit?: boolean
+  editUrl?: string
+}) {
   const date = new Date(event.createdAt).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric'
   })
@@ -268,7 +302,14 @@ function EventRow({ event, tags }: { event: Event; tags: TagConfig[] }) {
       <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
         <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-lg shrink-0">💸</div>
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-zinc-900 truncate">{e.description}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-medium text-zinc-900 truncate">{e.description}</p>
+            {isEdited && (
+              <span className="shrink-0 text-xs bg-amber-100 text-amber-700 font-medium px-1.5 py-0.5 rounded-full">
+                edited
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {date}</p>
             {(e.tags ?? []).map(tag => (
@@ -279,7 +320,18 @@ function EventRow({ event, tags }: { event: Event; tags: TagConfig[] }) {
             ))}
           </div>
         </div>
-        <p className="font-semibold text-zinc-900 shrink-0">{formatAmount(e.amount, e.currency)}</p>
+        <div className="flex items-center gap-2 shrink-0">
+          <p className="font-semibold text-zinc-900">{formatAmount(e.amount, e.currency)}</p>
+          {canEdit && (
+            <Link to={editUrl}
+              className="text-zinc-400 hover:text-zinc-700 p-1.5 rounded-lg hover:bg-zinc-100 transition-colors"
+              title="Edit expense">
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+              </svg>
+            </Link>
+          )}
+        </div>
       </div>
     )
   } else {
