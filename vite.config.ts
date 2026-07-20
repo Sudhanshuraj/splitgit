@@ -33,6 +33,11 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // Take control immediately and drop old caches so a new deploy
+        // applies on the very next page load — no manual cache clearing.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {

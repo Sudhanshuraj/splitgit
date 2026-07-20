@@ -2,8 +2,32 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
+import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import { App } from './App'
+
+// Auto-update: when a new version is deployed, activate it immediately and
+// reload the page so the new code runs. No manual cache clearing ever needed.
+//
+// skipWaiting + clientsClaim (set in vite.config workbox) make the new SW take
+// control right away; that fires `controllerchange`, which we listen for below
+// to reload the currently-open tab exactly once.
+if ('serviceWorker' in navigator) {
+  let reloading = false
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return
+    reloading = true
+    window.location.reload()
+  })
+}
+
+registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    // prompt-mode fallback — force the update through immediately
+    window.location.reload()
+  }
+})
 
 const queryClient = new QueryClient({
   defaultOptions: {
