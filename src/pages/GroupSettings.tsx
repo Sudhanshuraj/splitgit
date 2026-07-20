@@ -3,10 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { v4 as uuidv4 } from 'uuid'
 import { useAuthStore } from '../store/auth'
-import { getGroupConfig, saveGroupConfig, archiveGroup, deleteGroup } from '../lib/github'
+import { getGroupConfig, saveGroupConfig, archiveGroup, deleteGroup, listMembers } from '../lib/github'
 import { invalidateCachedConfig, invalidateCachedEvents } from '../lib/cache'
 import { Spinner } from '../components/Spinner'
-import type { TagConfig } from '../types'
+import type { TagConfig, GroupConfig } from '../types'
 
 const PRESET_EMOJIS = [
   '🍔', '🍕', '☕', '🍺', '🛒',
@@ -34,20 +34,57 @@ export function GroupSettings() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
+  // Nickname edit state: login → draft nickname
+  const [nickDrafts, setNickDrafts] = useState<Record<string, string>>({})
+
   const { data: configData, isLoading } = useQuery({
     queryKey: ['config', owner, repo],
     queryFn: () => getGroupConfig(octokit!, owner!, repo!),
     enabled: !!octokit && !!owner && !!repo
   })
 
+  const { data: members } = useQuery({
+    queryKey: ['members', owner, repo],
+    queryFn: () => listMembers(octokit!, owner!, repo!),
+    enabled: !!octokit && !!owner && !!repo,
+    staleTime: 60_000
+  })
+
+  // Save the whole config, always preserving both tags and nicknames.
+  function persistConfig(next: Partial<Pick<GroupConfig, 'tags' | 'nicknames'>>) {
+    const current = configData?.config
+    const merged: GroupConfig = {
+      version: 2,
+      tags: next.tags ?? current?.tags ?? [],
+      nicknames: next.nicknames ?? current?.nicknames ?? {}
+    }
+    return saveGroupConfig(octokit!, owner!, repo!, merged, configData?.sha ?? null)
+  }
+
   const saveMutation = useMutation({
-    mutationFn: (tags: TagConfig[]) =>
-      saveGroupConfig(octokit!, owner!, repo!, { version: 2, tags }, configData?.sha ?? null),
+    mutationFn: (tags: TagConfig[]) => persistConfig({ tags }),
     onSuccess: async () => {
       await invalidateCachedConfig(owner!, repo!)
       qc.invalidateQueries({ queryKey: ['config', owner, repo] })
     }
   })
+
+  const nickMutation = useMutation({
+    mutationFn: (nicknames: Record<string, string>) => persistConfig({ nicknames }),
+    onSuccess: async () => {
+      await invalidateCachedConfig(owner!, repo!)
+      qc.invalidateQueries({ queryKey: ['config', owner, repo] })
+    }
+  })
+
+  function saveNickname(login: string) {
+    const current = configData?.config.nicknames ?? {}
+    const draft = (nickDrafts[login] ?? '').trim()
+    const next = { ...current }
+    if (draft) next[login] = draft
+    else delete next[login]   // empty clears the nickname
+    nickMutation.mutate(next)
+  }
 
   const archiveMutation = useMutation({
     mutationFn: () => archiveGroup(octokit!, owner!, repo!),
@@ -218,6 +255,52 @@ export function GroupSettings() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Member nicknames */}
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-700 mb-1">
+              Member Nicknames
+            </h2>
+            <p className="text-xs text-zinc-400 mb-3">
+              Show a friendly name instead of the GitHub username across this group.
+            </p>
+            <div className="space-y-2">
+              {(members ?? []).map(m => {
+                const savedNick = configData?.config.nicknames?.[m.login] ?? ''
+                const draft = nickDrafts[m.login] ?? savedNick
+                const dirty = draft.trim() !== savedNick.trim()
+                return (
+                  <div key={m.login} className="flex items-center gap-3 bg-white border border-zinc-200 rounded-xl px-3 py-2.5">
+                    <img src={m.avatarUrl} alt={m.login} className="w-8 h-8 rounded-full shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={draft}
+                        onChange={e => setNickDrafts(prev => ({ ...prev, [m.login]: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && dirty && saveNickname(m.login)}
+                        placeholder={m.login}
+                        className="w-full border border-zinc-200 rounded-lg px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <p className="text-[11px] text-zinc-400 mt-0.5 truncate">@{m.login}</p>
+                    </div>
+                    {dirty && (
+                      <button
+                        onClick={() => saveNickname(m.login)}
+                        disabled={nickMutation.isPending}
+                        className="shrink-0 bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                        {nickMutation.isPending ? <Spinner /> : 'Save'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {nickMutation.error && (
+              <p className="text-red-600 text-sm mt-2">
+                {nickMutation.error instanceof Error ? nickMutation.error.message : 'Failed to save nickname'}
+              </p>
             )}
           </div>
 

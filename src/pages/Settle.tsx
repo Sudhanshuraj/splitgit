@@ -4,10 +4,12 @@
  */
 import { useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { addSettlement } from '../lib/eventLog'
+import { getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
+import { handleOf } from '../lib/names'
 import { Spinner } from '../components/Spinner'
 
 const CURRENCY = 'INR'
@@ -26,6 +28,13 @@ export function Settle() {
   const [amount, setAmount] = useState(prefill?.amount?.toFixed(2) ?? '')
   const currency = CURRENCY
   const [note, setNote] = useState('')
+
+  const { data: configData } = useQuery({
+    queryKey: ['config', owner, repo],
+    queryFn: () => getGroupConfig(octokit!, owner!, repo!),
+    enabled: !!octokit && !!owner && !!repo,
+    staleTime: 60_000
+  })
 
   const parsedAmount = parseFloat(amount)
   const isValid =
@@ -72,7 +81,7 @@ export function Settle() {
           )}
           <div>
             <p className="text-xs text-zinc-400 font-medium uppercase tracking-wide">From (you)</p>
-            <p className="font-semibold text-zinc-900">@{user?.login}</p>
+            <p className="font-semibold text-zinc-900">{user ? handleOf(user.login, configData?.config) : ''}</p>
           </div>
         </div>
 
@@ -123,7 +132,7 @@ export function Settle() {
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-zinc-600">
             Recording that <span className="font-semibold text-zinc-900">you</span> paid{' '}
             <span className="font-semibold text-emerald-600">{formatAmount(parsedAmount, currency)}</span>
-            {' '}to <span className="font-semibold text-zinc-900">@{to}</span>.
+            {' '}to <span className="font-semibold text-zinc-900">{handleOf(to, configData?.config)}</span>.
           </div>
         )}
 

@@ -14,6 +14,7 @@ import { listMembers, getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
 import { Spinner } from '../components/Spinner'
 import { DatePicker } from '../components/DatePicker'
+import { handleOf } from '../lib/names'
 import type { Expense } from '../types'
 
 const CURRENCY = 'INR'
@@ -206,7 +207,7 @@ export function EditExpense() {
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors
                   ${paidBy === m.login ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
                 <img src={m.avatarUrl} alt={m.login} className="w-5 h-5 rounded-full" />
-                @{m.login}
+                {handleOf(m.login, configData?.config)}
               </button>
             ))}
           </div>
@@ -230,7 +231,7 @@ export function EditExpense() {
                   )}
                 </div>
                 <img src={m.avatarUrl} alt={m.login} className="w-7 h-7 rounded-full" />
-                <span className="font-medium text-zinc-800">@{m.login}</span>
+                <span className="font-medium text-zinc-800">{handleOf(m.login, configData?.config)}</span>
                 {participants.has(m.login) && perPerson > 0 && (
                   <span className="ml-auto text-emerald-600 font-semibold">{formatAmount(perPerson, currency)}</span>
                 )}
@@ -241,7 +242,7 @@ export function EditExpense() {
 
         {isValid && (
           <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-4 text-sm text-zinc-600">
-            <span className="font-medium text-zinc-900">@{paidBy}</span> paid{' '}
+            <span className="font-medium text-zinc-900">{handleOf(paidBy, configData?.config)}</span> paid{' '}
             <span className="font-medium text-zinc-900">{formatAmount(parsedAmount, currency)}</span>
             {' '}for {participants.size} people. Each owes{' '}
             <span className="font-medium text-emerald-600">{formatAmount(perPerson, currency)}</span>.

@@ -11,7 +11,8 @@ import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/ba
 import { listMembers, inviteMember, getGroupConfig, listGroups } from '../lib/github'
 import { Spinner } from '../components/Spinner'
 import { Analytics } from '../components/Analytics'
-import type { Event, Expense, Settlement, TagConfig } from '../types'
+import { handleOf } from '../lib/names'
+import type { Event, Expense, Settlement, TagConfig, GroupConfig } from '../types'
 
 export function Group() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>()
@@ -167,7 +168,7 @@ export function Group() {
             {members.map(m => (
               <div key={m.login} className="flex items-center gap-1.5 bg-zinc-50 rounded-full px-3 py-1">
                 <img src={m.avatarUrl} alt={m.login} className="w-5 h-5 rounded-full" />
-                <span className="text-xs text-zinc-700 font-medium">@{m.login}</span>
+                <span className="text-xs text-zinc-700 font-medium">{handleOf(m.login, configData?.config)}</span>
               </div>
             ))}
           </div>
@@ -282,18 +283,18 @@ export function Group() {
               <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide">Who owes who</h2>
               {settlements.map((s, i) => (
                 <div key={i} className="bg-white border border-zinc-200 rounded-2xl p-4 flex items-center gap-3">
-                  <MemberAvatar login={s.from} members={members ?? []} />
+                  <MemberAvatar login={s.from} members={members ?? []} config={configData?.config} />
                   <div className="flex-1">
                     <p className="text-sm text-zinc-700">
-                      <span className="font-semibold text-zinc-900">@{s.from}</span>
+                      <span className="font-semibold text-zinc-900">{handleOf(s.from, configData?.config)}</span>
                       {' '}owes{' '}
-                      <span className="font-semibold text-zinc-900">@{s.to}</span>
+                      <span className="font-semibold text-zinc-900">{handleOf(s.to, configData?.config)}</span>
                     </p>
                     <p className="text-lg font-bold text-emerald-600 mt-0.5">
                       {formatAmount(s.amount, s.currency)}
                     </p>
                   </div>
-                  <MemberAvatar login={s.to} members={members ?? []} />
+                  <MemberAvatar login={s.to} members={members ?? []} config={configData?.config} />
                   {user?.login === s.from && (
                     <Link
                       to={`/groups/${owner}/${repo}/settle`}
@@ -329,6 +330,7 @@ export function Group() {
                   key={event.id}
                   event={event}
                   tags={configData?.config.tags ?? []}
+                  config={configData?.config ?? null}
                   isEdited={correctedIds.has(event.id)}
                   canEdit={
                     event.type === 'EXPENSE' &&
@@ -359,18 +361,20 @@ export function Group() {
   )
 }
 
-function MemberAvatar({ login, members }: { login: string; members: { login: string; avatarUrl: string }[] }) {
+function MemberAvatar({ login, members, config }: { login: string; members: { login: string; avatarUrl: string }[]; config?: GroupConfig | null }) {
   const member = members.find(m => m.login === login)
+  const title = handleOf(login, config)
   return member
-    ? <img src={member.avatarUrl} alt={login} title={`@${login}`} className="w-9 h-9 rounded-full border-2 border-zinc-200" />
-    : <div className="w-9 h-9 rounded-full bg-zinc-200 flex items-center justify-center text-zinc-500 text-xs font-bold border-2 border-zinc-300">{login[0]?.toUpperCase()}</div>
+    ? <img src={member.avatarUrl} alt={login} title={title} className="w-9 h-9 rounded-full border-2 border-zinc-200" />
+    : <div title={title} className="w-9 h-9 rounded-full bg-zinc-200 flex items-center justify-center text-zinc-500 text-xs font-bold border-2 border-zinc-300">{login[0]?.toUpperCase()}</div>
 }
 
 function EventRow({
-  event, tags, isEdited = false, canEdit = false, editUrl = '', onDelete
+  event, tags, config, isEdited = false, canEdit = false, editUrl = '', onDelete
 }: {
   event: Event
   tags: TagConfig[]
+  config: GroupConfig | null
   isEdited?: boolean
   canEdit?: boolean
   editUrl?: string
@@ -403,7 +407,7 @@ function EventRow({
             )}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {txDate}</p>
+            <p className="text-xs text-zinc-400">paid by {handleOf(e.paidBy, config)} · {txDate}</p>
             {(e.tags ?? []).map(tagId => {
               const tag = tagById.get(tagId)
               return (
@@ -445,7 +449,7 @@ function EventRow({
         <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-lg shrink-0">✅</div>
         <div className="flex-1 min-w-0">
           <p className="font-medium text-zinc-900 text-sm">
-            @{s.from} → @{s.to}
+            {handleOf(s.from, config)} → {handleOf(s.to, config)}
           </p>
           <p className="text-xs text-zinc-400">Settlement · {createdDate}</p>
         </div>

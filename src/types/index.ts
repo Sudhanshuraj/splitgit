@@ -102,11 +102,14 @@ export interface TagConfig {
 export interface GroupConfig {
   version: 2
   tags: TagConfig[]
+  /** Per-group display names: GitHub login → nickname. Optional. */
+  nicknames?: Record<string, string>
 }
 
 export const DEFAULT_GROUP_CONFIG: GroupConfig = {
   version: 2,
-  tags: []
+  tags: [],
+  nicknames: {}
 }
 
 // ─── Offline queue ────────────────────────────────────────────────────────────
