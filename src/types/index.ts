@@ -14,7 +14,7 @@ export interface Expense {
   paidBy: string       // GitHub username
   splits: Split[]      // must sum to amount
   splitType: 'equal' | 'exact' | 'percentage'
-  tags: string[]       // user-defined tags e.g. ['food', 'transport']
+  tags: string[]       // tag IDs (references TagConfig.id)
   date: string         // YYYY-MM-DD — the actual expense date (user-set, defaults to today)
   supersedesId?: string // if set, this is a correction of the original event
   createdAt: string    // ISO 8601 — when the record was written (audit only)
@@ -54,6 +54,7 @@ export interface Group {
   members: Member[]
   createdAt: string
   isPrivate: boolean
+  archived: boolean
   htmlUrl: string
 }
 
@@ -93,20 +94,18 @@ export interface AuthUser {
 // ─── Group config (stored in config.json in the repo) ────────────────────────
 
 export interface TagConfig {
-  name: string        // e.g. "Food", "Transport"
-  emoji?: string      // optional emoji prefix e.g. "🍔"
-  // color + mandatory kept as optional for backward compat with old configs
-  color?: string
-  mandatory?: boolean
+  id: string          // stable UUID — stored in expenses, never changes
+  name: string        // e.g. "Food", "Transport" — can be renamed freely
+  emoji?: string      // optional emoji prefix e.g. "🍔" — can be changed freely
 }
 
 export interface GroupConfig {
-  version: 1
+  version: 2
   tags: TagConfig[]
 }
 
 export const DEFAULT_GROUP_CONFIG: GroupConfig = {
-  version: 1,
+  version: 2,
   tags: []
 }
 

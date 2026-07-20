@@ -10,11 +10,28 @@ import { getExpensesFile, updateExpensesFile } from './github'
 import { hashExpense, hashSettlement, hashDeletion } from './hash'
 import { getCachedEvents, setCachedEvents, invalidateCachedEvents } from './cache'
 
+import { v4 as uuidv4 } from 'uuid'
+
+// ─── NDJSON helpers ───────────────────────────────────────────────────────────
+
+/** Parse NDJSON: one JSON object per non-empty line */
+function parseNDJSON(content: string): Event[] {
+  return content
+    .split('\n')
+    .filter(line => line.trim().length > 0)
+    .map(line => JSON.parse(line) as Event)
+}
+
+/** Serialize events to NDJSON: one JSON object per line, trailing newline */
+function serializeNDJSON(events: Event[]): string {
+  if (events.length === 0) return ''
+  return events.map(e => JSON.stringify(e)).join('\n') + '\n'
+}
+
 // Bust the event cache so the next readEvents() fetches fresh from GitHub
 async function invalidateCachedEventsForRetry(owner: string, repo: string): Promise<void> {
   await invalidateCachedEvents(owner, repo)
 }
-import { v4 as uuidv4 } from 'uuid'
 
 // ─── Read with cache ──────────────────────────────────────────────────────────
 
@@ -33,7 +50,7 @@ export async function readEvents(
   }
 
   // 3. SHA changed or no cache — parse and update cache
-  const events = JSON.parse(content) as Event[]
+  const events = parseNDJSON(content)
   await setCachedEvents(owner, repo, sha, events)
   return { events, sha }
 }
@@ -73,7 +90,7 @@ async function appendEvent(
           : newEvent.type === 'EXPENSE_DELETION'
           ? `delete: expense ${(newEvent as ExpenseDeletion).deletedId.slice(0, 8)}`
           : `settle: ${(newEvent as Settlement).from} → ${(newEvent as Settlement).to} — ${(newEvent as Settlement).amount}`
-      await updateExpensesFile(octokit, owner, repo, JSON.stringify(updated, null, 2), sha, message)
+      await updateExpensesFile(octokit, owner, repo, serializeNDJSON(updated), sha, message)
       await setCachedEvents(owner, repo, sha, updated)
       return
     } catch (err: unknown) {

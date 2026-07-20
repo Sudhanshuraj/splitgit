@@ -112,7 +112,7 @@ export function AddExpense() {
           />
         </div>
 
-        {/* Tag — single required selection */}
+        {/* Tag — single required selection (stored as tag ID) */}
         {tags.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-zinc-700 mb-1.5">
@@ -120,10 +120,10 @@ export function AddExpense() {
             </label>
             <div className="flex flex-wrap gap-2">
               {tags.map(tag => {
-                const selected = selectedTag === tag.name
+                const selected = selectedTag === tag.id
                 return (
-                  <button key={tag.name} type="button"
-                    onClick={() => setSelectedTag(selected ? '' : tag.name)}
+                  <button key={tag.id} type="button"
+                    onClick={() => setSelectedTag(selected ? '' : tag.id)}
                     className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-all
                       ${selected
                         ? 'bg-emerald-50 border-emerald-400 text-emerald-700'

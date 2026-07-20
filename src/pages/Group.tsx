@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { readEvents, resolveExpenses, deleteExpense } from '../lib/eventLog'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
-import { listMembers, inviteMember, getGroupConfig } from '../lib/github'
+import { listMembers, inviteMember, getGroupConfig, listGroups } from '../lib/github'
 import { Spinner } from '../components/Spinner'
 import { Analytics } from '../components/Analytics'
 import type { Event, Expense, Settlement, TagConfig } from '../types'
@@ -44,6 +44,15 @@ export function Group() {
     enabled: !!octokit && !!owner && !!repo,
     staleTime: 60_000
   })
+
+  // Read archive status from the groups cache (avoids extra API call)
+  const { data: groups } = useQuery({
+    queryKey: ['groups'],
+    queryFn: () => listGroups(octokit!),
+    enabled: !!octokit,
+    staleTime: 60_000
+  })
+  const isArchived = groups?.find(g => g.owner === owner && g.name === repo)?.archived ?? false
 
   const inviteMutation = useMutation({
     mutationFn: (username: string) => inviteMember(octokit!, owner!, repo!, username),
@@ -127,10 +136,16 @@ export function Group() {
               </svg>
             </Link>
           )}
-          <Link to={`/groups/${owner}/${repo}/add`}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shrink-0">
-            + Add
-          </Link>
+          {isArchived ? (
+            <span className="text-xs bg-amber-100 text-amber-700 font-medium px-3 py-2 rounded-xl shrink-0">
+              archived
+            </span>
+          ) : (
+            <Link to={`/groups/${owner}/${repo}/add`}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shrink-0">
+              + Add
+            </Link>
+          )}
         </div>
       </div>
 
@@ -364,7 +379,8 @@ function EventRow({
   const createdDate = new Date(event.createdAt).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric'
   })
-  const tagEmojiMap = new Map(tags.filter(t => t.emoji).map(t => [t.name, t.emoji!]))
+  // Tag lookup by ID
+  const tagById = new Map(tags.map(t => [t.id, t]))
 
   if (event.type === 'EXPENSE') {
     const e = event as Expense
@@ -388,12 +404,15 @@ function EventRow({
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <p className="text-xs text-zinc-400">paid by @{e.paidBy} · {txDate}</p>
-            {(e.tags ?? []).map(tag => (
-              <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
-                {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
-                {tag}
-              </span>
-            ))}
+            {(e.tags ?? []).map(tagId => {
+              const tag = tagById.get(tagId)
+              return (
+                <span key={tagId} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
+                  {tag?.emoji && <span className="mr-0.5">{tag.emoji}</span>}
+                  {tag?.name ?? tagId}
+                </span>
+              )
+            })}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">

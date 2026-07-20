@@ -36,7 +36,7 @@ export const GITHUB_OAUTH_CONFIG = {
 }
 
 export const SPLITGIT_REPO_TOPIC = 'splitgit-group'
-const EXPENSES_FILE_PATH = 'expenses.json'
+const EXPENSES_FILE_PATH = 'expenses.ndjson'
 const CONFIG_FILE_PATH = 'config.json'
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -110,6 +110,7 @@ export async function listGroups(octokit: Octokit): Promise<Group[]> {
       members,
       createdAt: r.created_at ?? new Date().toISOString(),
       isPrivate: r.private,
+      archived: r.archived ?? false,
       htmlUrl: r.html_url
     } satisfies Group
   }))
@@ -137,14 +138,13 @@ export async function createGroup(
     names: [SPLITGIT_REPO_TOPIC]
   })
 
-  // Commit the initial empty expenses.json
-  const content = toBase64(JSON.stringify([], null, 2))
+  // Commit the initial empty expenses.ndjson
   await octokit.rest.repos.createOrUpdateFileContents({
     owner: repo.owner.login,
     repo: repo.name,
     path: EXPENSES_FILE_PATH,
     message: 'chore: initialise SplitGit expense log',
-    content
+    content: toBase64('')   // empty NDJSON file
   })
 
   const { data: user } = await octokit.rest.users.getAuthenticated()
@@ -158,6 +158,7 @@ export async function createGroup(
     members: [owner],
     createdAt: repo.created_at ?? new Date().toISOString(),
     isPrivate: true,
+    archived: false,
     htmlUrl: repo.html_url
   }
 }
@@ -168,6 +169,22 @@ export async function deleteGroup(
   repo: string
 ): Promise<void> {
   await octokit.rest.repos.delete({ owner, repo })
+}
+
+export async function archiveGroup(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<void> {
+  await octokit.rest.repos.update({ owner, repo, archived: true })
+}
+
+export async function unarchiveGroup(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<void> {
+  await octokit.rest.repos.update({ owner, repo, archived: false })
 }
 
 // ─── Members ─────────────────────────────────────────────────────────────────

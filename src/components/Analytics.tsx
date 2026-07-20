@@ -197,34 +197,34 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
     })
   }, [events, range])
 
-  // Emoji lookup
-  const tagEmojiMap = useMemo(() => {
-    const map = new Map<string, string>()
-    tags.forEach(t => { if (t.emoji) map.set(t.name, t.emoji) })
-    return map
-  }, [tags])
+  // Tag lookup by ID → {name, emoji}
+  const tagById = useMemo(() => new Map(tags.map(t => [t.id, t])), [tags])
 
-  // Aggregate spend by tag
+  // Aggregate spend by tag ID, resolve to display name for slices
   const slices: Slice[] = useMemo(() => {
-    const byTag = new Map<string, number>()
+    const byTagId = new Map<string, number>()
     let total = 0
 
     for (const e of expenses) {
       total += e.amount
-      const tag = e.tags[0] ?? 'Untagged'
-      byTag.set(tag, (byTag.get(tag) ?? 0) + e.amount)
+      const tagId = e.tags[0] ?? '__untagged__'
+      byTagId.set(tagId, (byTagId.get(tagId) ?? 0) + e.amount)
     }
 
-    return Array.from(byTag.entries())
-      .map(([label, amount], i) => ({
-        label,
-        emoji: tagEmojiMap.get(label),
-        amount: parseFloat(amount.toFixed(2)),
-        color: label === 'Untagged' ? UNTAGGED_COLOR : TAG_COLORS[i % TAG_COLORS.length]!,
-        percentage: total > 0 ? (amount / total) * 100 : 0
-      }))
+    return Array.from(byTagId.entries())
+      .map(([tagId, amount], i) => {
+        const tag = tagById.get(tagId)
+        const label = tag?.name ?? (tagId === '__untagged__' ? 'Untagged' : tagId)
+        return {
+          label,
+          emoji: tag?.emoji,
+          amount: parseFloat(amount.toFixed(2)),
+          color: tagId === '__untagged__' ? UNTAGGED_COLOR : TAG_COLORS[i % TAG_COLORS.length]!,
+          percentage: total > 0 ? (amount / total) * 100 : 0
+        }
+      })
       .sort((a, b) => b.amount - a.amount)
-  }, [expenses, tagEmojiMap])
+  }, [expenses, tagById])
 
   const totalSpend = expenses.reduce((s, e) => s + e.amount, 0)
   const expenseCount = expenses.length
@@ -329,12 +329,15 @@ export function Analytics({ events, tags, currency }: AnalyticsProps) {
                             return new Date(y!, m! - 1, d!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                           })()}
                         </p>
-                        {e.tags.map(tag => (
-                          <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
-                            {tagEmojiMap.get(tag) && <span className="mr-0.5">{tagEmojiMap.get(tag)}</span>}
-                            {tag}
-                          </span>
-                        ))}
+                        {e.tags.map(tagId => {
+                          const tag = tagById.get(tagId)
+                          return (
+                            <span key={tagId} className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
+                              {tag?.emoji && <span className="mr-0.5">{tag.emoji}</span>}
+                              {tag?.name ?? tagId}
+                            </span>
+                          )
+                        })}
                       </div>
                     </div>
                     <p className="text-sm font-semibold text-zinc-900 shrink-0">
