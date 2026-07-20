@@ -169,6 +169,22 @@ export function GroupSettings() {
             Every expense requires exactly one tag. Renaming a tag updates all historical expenses automatically.
           </div>
 
+          {/* Import CSV */}
+          <button
+            onClick={() => navigate(`/groups/${owner}/${repo}/import`)}
+            className="w-full flex items-center justify-between bg-white border border-zinc-200 rounded-2xl px-4 py-3 hover:border-emerald-300 hover:shadow-sm transition-all">
+            <div className="flex items-center gap-3">
+              <span className="text-xl">📥</span>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-zinc-800">Import from CSV</p>
+                <p className="text-xs text-zinc-400">Bulk-add expenses &amp; settlements (e.g. from SplitKaro)</p>
+              </div>
+            </div>
+            <svg className="w-5 h-5 text-zinc-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+            </svg>
+          </button>
+
           {/* Existing tags */}
           <div>
             <h2 className="text-sm font-semibold text-zinc-700 mb-3">

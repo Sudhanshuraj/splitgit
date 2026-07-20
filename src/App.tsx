@@ -10,6 +10,7 @@ import { Settle } from './pages/Settle'
 import { GlobalSettle } from './pages/GlobalSettle'
 import { GroupSettings } from './pages/GroupSettings'
 import { EditExpense } from './pages/EditExpense'
+import { ImportCsv } from './pages/ImportCsv'
 import { getQueuedEvents, removeQueuedEvent, isOnline, onOnline } from './lib/offline'
 import { addExpense, addSettlement } from './lib/eventLog'
 import type { Expense, Settlement } from './types'
@@ -132,6 +133,16 @@ export function App() {
         element={
           <RequireAuth>
             <Layout><GroupSettings /></Layout>
+          </RequireAuth>
+        }
+      />
+
+      {/* CSV import */}
+      <Route
+        path="/groups/:owner/:repo/import"
+        element={
+          <RequireAuth>
+            <Layout><ImportCsv /></Layout>
           </RequireAuth>
         }
       />

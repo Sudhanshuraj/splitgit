@@ -5,10 +5,11 @@
  */
 
 import { Octokit } from 'octokit'
-import type { Event, Expense, Settlement, ExpenseDeletion } from '../types'
-import { getExpensesFile, updateExpensesFile } from './github'
+import type { Event, Expense, Settlement, ExpenseDeletion, TagConfig } from '../types'
+import { getExpensesFile, updateExpensesFile, getGroupConfig, saveGroupConfig } from './github'
 import { hashExpense, hashSettlement, hashDeletion } from './hash'
-import { getCachedEvents, setCachedEvents, invalidateCachedEvents } from './cache'
+import { getCachedEvents, setCachedEvents, invalidateCachedEvents, invalidateCachedConfig } from './cache'
+import type { ImportExpenseRow, ImportSettlementRow } from './importCsv'
 
 import { v4 as uuidv4 } from 'uuid'
 
@@ -264,6 +265,107 @@ export async function deleteExpense(
  * - Deleted expenses are excluded entirely.
  * - For edited expenses, only the latest version is shown.
  */
+// ─── Batch append (one commit for many events) ────────────────────────────────
+
+async function appendEvents(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  events: Event[],
+  retries = 5
+): Promise<void> {
+  if (events.length === 0) return
+  for (let attempt = 0; attempt < retries; attempt++) {
+    if (attempt > 0) await invalidateCachedEventsForRetry(owner, repo)
+    const { events: existing, sha } = await readEvents(octokit, owner, repo)
+    const updated = [...existing, ...events]
+    try {
+      await updateExpensesFile(
+        octokit, owner, repo, serializeNDJSON(updated), sha,
+        `import: ${events.length} event${events.length === 1 ? '' : 's'}`
+      )
+      await setCachedEvents(owner, repo, sha, updated)
+      return
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : ''
+      const isRetryable = msg.includes('409') || msg.includes('422') || msg.includes('does not match')
+      if (!isRetryable || attempt === retries - 1) throw err
+      await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
+    }
+  }
+}
+
+// ─── CSV import ────────────────────────────────────────────────────────────────
+
+export interface ImportPlan {
+  expenses: ImportExpenseRow[]
+  settlements: ImportSettlementRow[]
+}
+
+/**
+ * Import parsed CSV rows into the group in a single commit.
+ * Missing tags are created in config.json first (one config write), then all
+ * expense + settlement events are appended chronologically in one commit.
+ */
+export async function importEvents(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  plan: ImportPlan
+): Promise<{ added: number; tagsCreated: string[] }> {
+  // 1. Resolve / create tags by name
+  const { config, sha: configSha } = await getGroupConfig(octokit, owner, repo)
+  const tags: TagConfig[] = [...config.tags]
+  const byName = new Map(tags.map(t => [t.name.toLowerCase(), t]))
+  const created: string[] = []
+  function tagId(name: string): string | undefined {
+    const key = name.trim().toLowerCase()
+    if (!key) return undefined
+    let t = byName.get(key)
+    if (!t) {
+      t = { id: uuidv4(), name: name.trim() }
+      tags.push(t); byName.set(key, t); created.push(t.name)
+    }
+    return t.id
+  }
+  for (const e of plan.expenses) if (e.tag) tagId(e.tag)
+  if (created.length > 0) {
+    await saveGroupConfig(octokit, owner, repo, { version: 2, tags, nicknames: config.nicknames ?? {} }, configSha)
+    await invalidateCachedConfig(owner, repo)
+  }
+
+  // 2. Build events
+  const newEvents: Event[] = []
+  for (const e of plan.expenses) {
+    const id = uuidv4()
+    const createdAt = `${e.date}T12:00:00.000Z`  // stable, date-preserving
+    const tid = e.tag ? tagId(e.tag) : undefined
+    const base = {
+      id, type: 'EXPENSE' as const, description: e.description, amount: e.amount, currency: 'INR',
+      paidBy: e.paidBy, splits: e.splits, splitType: e.splitType, tags: tid ? [tid] : [], date: e.date, createdAt
+    }
+    const hash = await hashExpense(base)
+    newEvents.push({ ...base, hash })
+  }
+  for (const s of plan.settlements) {
+    const id = uuidv4()
+    const createdAt = `${s.date}T12:00:00.000Z`
+    const base = {
+      id, type: 'SETTLEMENT' as const, from: s.from, to: s.to,
+      amount: s.amount, currency: 'INR', note: s.note || undefined, createdAt
+    }
+    const hash = await hashSettlement(base)
+    newEvents.push({ ...base, hash })
+  }
+
+  // 3. Chronological order
+  newEvents.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+  // 4. One commit
+  await appendEvents(octokit, owner, repo, newEvents)
+  return { added: newEvents.length, tagsCreated: created }
+}
+
 export function resolveExpenses(events: Event[]): Expense[] {
   const expenses = events.filter(e => e.type === 'EXPENSE') as Expense[]
 
