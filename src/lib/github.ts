@@ -32,7 +32,7 @@ export const GITHUB_OAUTH_CONFIG = {
   /** Your Cloudflare Worker URL that exchanges the code for a token */
   workerUrl: import.meta.env.VITE_OAUTH_WORKER_URL ?? 'https://your-worker.workers.dev/callback',
   /** Scopes needed: repo (to create/read private repos) + read:user */
-  scope: 'repo read:user user:email'
+  scope: 'repo delete_repo read:user user:email'
 }
 
 export const SPLITGIT_REPO_TOPIC = 'splitgit-group'

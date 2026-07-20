@@ -43,6 +43,9 @@ export function Groups() {
       unarchiveGroup(octokit!, owner, repo),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['groups'] })
+    },
+    onError: (err) => {
+      console.error('Unarchive failed:', err)
     }
   })
 
@@ -197,6 +200,7 @@ export function Groups() {
                   : undefined
               }
               unarchiving={unarchiveMutation.isPending}
+              unarchiveError={unarchiveMutation.error instanceof Error ? unarchiveMutation.error.message : undefined}
             />
           ))}
         </div>
@@ -209,12 +213,14 @@ function GroupCard({
   group,
   currentUser,
   onUnarchive,
-  unarchiving
+  unarchiving,
+  unarchiveError
 }: {
   group: Group
   currentUser: string
   onUnarchive?: () => void
   unarchiving?: boolean
+  unarchiveError?: string
 }) {
   const navigate = useNavigate()
   const isOwner = group.owner === currentUser
@@ -257,6 +263,10 @@ function GroupCard({
           )
         )}
       </div>
+
+      {unarchiveError && (
+        <p className="text-xs text-red-600 mt-2 px-1">{unarchiveError}</p>
+      )}
 
       {/* Member avatars */}
       <div className="flex items-center gap-1 mt-3">
