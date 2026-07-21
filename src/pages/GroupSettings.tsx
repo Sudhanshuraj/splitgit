@@ -3,10 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { v4 as uuidv4 } from 'uuid'
 import { useAuthStore } from '../store/auth'
-import { getGroupConfig, saveGroupConfig, archiveGroup, deleteGroup, listMembers } from '../lib/github'
+import { getGroupConfig, saveGroupConfig, archiveGroup, deleteGroup } from '../lib/github'
 import { invalidateCachedConfig, invalidateCachedEvents } from '../lib/cache'
+import { myMemberId, memberInitial, nextMemberId } from '../lib/members'
 import { Spinner } from '../components/Spinner'
-import type { TagConfig, GroupConfig } from '../types'
+import type { TagConfig, GroupConfig, LedgerMember } from '../types'
 
 const PRESET_EMOJIS = [
   '🍔', '🍕', '☕', '🍺', '🛒',
@@ -34,8 +35,10 @@ export function GroupSettings() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
-  // Nickname edit state: login → draft nickname
-  const [nickDrafts, setNickDrafts] = useState<Record<string, string>>({})
+  // Member management state
+  const [newMemberName, setNewMemberName] = useState('')
+  const [claimChoice, setClaimChoice] = useState<string>('')  // '' | member id | '__new__'
+  const [newClaimName, setNewClaimName] = useState('')
 
   const { data: configData, isLoading } = useQuery({
     queryKey: ['config', owner, repo],
@@ -43,47 +46,64 @@ export function GroupSettings() {
     enabled: !!octokit && !!owner && !!repo
   })
 
-  const { data: members } = useQuery({
-    queryKey: ['members', owner, repo],
-    queryFn: () => listMembers(octokit!, owner!, repo!),
-    enabled: !!octokit && !!owner && !!repo,
-    staleTime: 60_000
-  })
+  const config = configData?.config
+  const ledger = config?.members ?? []
+  const myId = myMemberId(config, user?.login)
 
-  // Save the whole config, always preserving both tags and nicknames.
-  function persistConfig(next: Partial<Pick<GroupConfig, 'tags' | 'nicknames'>>) {
-    const current = configData?.config
+  // Save the whole config, preserving tags + members.
+  function persistConfig(next: Partial<Pick<GroupConfig, 'tags' | 'members'>>) {
     const merged: GroupConfig = {
-      version: 2,
-      tags: next.tags ?? current?.tags ?? [],
-      nicknames: next.nicknames ?? current?.nicknames ?? {}
+      version: 3,
+      tags: next.tags ?? config?.tags ?? [],
+      members: next.members ?? config?.members ?? []
     }
     return saveGroupConfig(octokit!, owner!, repo!, merged, configData?.sha ?? null)
   }
 
   const saveMutation = useMutation({
     mutationFn: (tags: TagConfig[]) => persistConfig({ tags }),
-    onSuccess: async () => {
-      await invalidateCachedConfig(owner!, repo!)
-      qc.invalidateQueries({ queryKey: ['config', owner, repo] })
-    }
+    onSuccess: async () => { await invalidateCachedConfig(owner!, repo!); qc.invalidateQueries({ queryKey: ['config', owner, repo] }) }
   })
 
-  const nickMutation = useMutation({
-    mutationFn: (nicknames: Record<string, string>) => persistConfig({ nicknames }),
-    onSuccess: async () => {
-      await invalidateCachedConfig(owner!, repo!)
-      qc.invalidateQueries({ queryKey: ['config', owner, repo] })
-    }
+  const memberMutation = useMutation({
+    mutationFn: (members: LedgerMember[]) => persistConfig({ members }),
+    onSuccess: async () => { await invalidateCachedConfig(owner!, repo!); qc.invalidateQueries({ queryKey: ['config', owner, repo] }) }
   })
 
-  function saveNickname(login: string) {
-    const current = configData?.config.nicknames ?? {}
-    const draft = (nickDrafts[login] ?? '').trim()
-    const next = { ...current }
-    if (draft) next[login] = draft
-    else delete next[login]   // empty clears the nickname
-    nickMutation.mutate(next)
+  function addMember() {
+    const name = newMemberName.trim()
+    if (!name) return
+    memberMutation.mutate([...ledger, { id: nextMemberId(config), name }])
+    setNewMemberName('')
+  }
+  function renameMember(id: number, name: string) {
+    if (!name.trim()) return
+    memberMutation.mutate(ledger.map(m => m.id === id ? { ...m, name: name.trim() } : m))
+  }
+  function claimSlot() {
+    if (!user) return
+    let members = ledger
+    let targetId: number
+    if (claimChoice === '__new__') {
+      const name = newClaimName.trim()
+      if (!name) return
+      targetId = nextMemberId(config)
+      members = [...members, { id: targetId, name }]
+    } else {
+      targetId = parseInt(claimChoice, 10)
+      if (isNaN(targetId)) return
+    }
+    // release any slot I previously held, then claim the target
+    members = members.map(m => {
+      if (m.claimedBy === user.login) return { ...m, claimedBy: undefined }
+      return m
+    }).map(m => m.id === targetId ? { ...m, claimedBy: user.login } : m)
+    memberMutation.mutate(members)
+    setClaimChoice(''); setNewClaimName('')
+  }
+  function unclaim() {
+    if (!user) return
+    memberMutation.mutate(ledger.map(m => m.claimedBy === user.login ? { ...m, claimedBy: undefined } : m))
   }
 
   const archiveMutation = useMutation({
@@ -138,15 +158,7 @@ export function GroupSettings() {
     setEditingId(null)
   }
 
-  if (!isOwner) {
-    return (
-      <div className="text-center py-16 text-zinc-500">
-        <p className="text-4xl mb-3">🔒</p>
-        <p className="font-medium text-zinc-700">Owner only</p>
-        <p className="text-sm mt-1">Only the group owner can change settings.</p>
-      </div>
-    )
-  }
+  const unclaimed = ledger.filter(m => !m.claimedBy)
 
   return (
     <div>
@@ -164,6 +176,38 @@ export function GroupSettings() {
 
       {isLoading ? <Spinner className="py-12" /> : (
         <div className="space-y-6">
+
+          {/* Who are you? — claim a member slot */}
+          <div className="bg-white border border-zinc-200 rounded-2xl p-4">
+            <h2 className="text-sm font-semibold text-zinc-700 mb-1">Who are you?</h2>
+            <p className="text-xs text-zinc-400 mb-3">Link your GitHub account to a member so your expenses attribute to you.</p>
+            {myId != null ? (
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center">{memberInitial(myId, config)}</span>
+                <p className="flex-1 text-sm text-zinc-800">You are <span className="font-semibold">{ledger.find(m => m.id === myId)?.name}</span></p>
+                <button onClick={unclaim} disabled={memberMutation.isPending} className="text-xs text-zinc-400 hover:text-red-500 font-medium">Change</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <select value={claimChoice} onChange={e => setClaimChoice(e.target.value)}
+                  className="w-full border border-zinc-300 rounded-xl px-3 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white">
+                  <option value="">Select who you are…</option>
+                  {unclaimed.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  <option value="__new__">➕ I'm someone new…</option>
+                </select>
+                {claimChoice === '__new__' && (
+                  <input type="text" value={newClaimName} onChange={e => setNewClaimName(e.target.value)}
+                    placeholder="Your name" className="w-full border border-zinc-300 rounded-xl px-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                )}
+                {claimChoice && (
+                  <button onClick={claimSlot} disabled={memberMutation.isPending || (claimChoice === '__new__' && !newClaimName.trim())}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2">
+                    {memberMutation.isPending ? <Spinner /> : "That's me"}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
             Every expense requires exactly one tag. Renaming a tag updates all historical expenses automatically.
@@ -274,53 +318,34 @@ export function GroupSettings() {
             )}
           </div>
 
-          {/* Member nicknames */}
+          {/* Members */}
           <div>
             <h2 className="text-sm font-semibold text-zinc-700 mb-1">
-              Member Nicknames
+              Members {ledger.length > 0 && <span className="text-zinc-400 font-normal">({ledger.length})</span>}
             </h2>
             <p className="text-xs text-zinc-400 mb-3">
-              Show a friendly name instead of the GitHub username across this group.
+              Renaming a member updates every transaction automatically — transactions reference the member's id, not their name.
             </p>
             <div className="space-y-2">
-              {(members ?? []).map(m => {
-                const savedNick = configData?.config.nicknames?.[m.login] ?? ''
-                const draft = nickDrafts[m.login] ?? savedNick
-                const dirty = draft.trim() !== savedNick.trim()
-                return (
-                  <div key={m.login} className="flex items-center gap-3 bg-white border border-zinc-200 rounded-xl px-3 py-2.5">
-                    <img src={m.avatarUrl} alt={m.login} className="w-8 h-8 rounded-full shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <input
-                        type="text"
-                        value={draft}
-                        onChange={e => setNickDrafts(prev => ({ ...prev, [m.login]: e.target.value }))}
-                        onKeyDown={e => e.key === 'Enter' && dirty && saveNickname(m.login)}
-                        placeholder={m.login}
-                        className="w-full border border-zinc-200 rounded-lg px-3 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      <p className="text-[11px] text-zinc-400 mt-0.5 truncate">@{m.login}</p>
-                    </div>
-                    {dirty && (
-                      <button
-                        onClick={() => saveNickname(m.login)}
-                        disabled={nickMutation.isPending}
-                        className="shrink-0 bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
-                        {nickMutation.isPending ? <Spinner /> : 'Save'}
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
+              {ledger.map(m => (
+                <MemberRow key={m.id} member={m} config={config ?? null}
+                  onRename={name => renameMember(m.id, name)} busy={memberMutation.isPending} />
+              ))}
             </div>
-            {nickMutation.error && (
-              <p className="text-red-600 text-sm mt-2">
-                {nickMutation.error instanceof Error ? nickMutation.error.message : 'Failed to save nickname'}
-              </p>
+            <div className="flex gap-2 mt-3">
+              <input type="text" value={newMemberName} onChange={e => setNewMemberName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addMember()} placeholder="Add a member…"
+                className="flex-1 border border-zinc-300 rounded-xl px-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <button onClick={addMember} disabled={!newMemberName.trim() || memberMutation.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 text-white text-sm font-semibold px-4 rounded-xl transition-colors">+ Add</button>
+            </div>
+            {memberMutation.error && (
+              <p className="text-red-600 text-sm mt-2">{memberMutation.error instanceof Error ? memberMutation.error.message : 'Failed to save members'}</p>
             )}
           </div>
 
-          {/* Danger Zone */}
+          {/* Danger Zone (owner only) */}
+          {isOwner && (
           <div className="border border-red-200 rounded-2xl overflow-hidden">
             <div className="bg-red-50 px-4 py-3 border-b border-red-200">
               <h2 className="text-sm font-semibold text-red-700">Danger Zone</h2>
@@ -352,6 +377,7 @@ export function GroupSettings() {
               </div>
             </div>
           </div>
+          )}
 
           {/* Archive confirmation modal */}
           {showArchiveConfirm && (
@@ -467,6 +493,41 @@ export function GroupSettings() {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function MemberRow({ member, config, onRename, busy }: {
+  member: LedgerMember
+  config: GroupConfig | null
+  onRename: (name: string) => void
+  busy: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(member.name)
+  return (
+    <div className="flex items-center gap-3 bg-white border border-zinc-200 rounded-xl px-3 py-2.5">
+      <span className="w-8 h-8 rounded-full bg-zinc-200 text-zinc-600 text-xs font-bold flex items-center justify-center shrink-0">{memberInitial(member.id, config)}</span>
+      {editing ? (
+        <input type="text" value={draft} autoFocus onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { onRename(draft); setEditing(false) } }}
+          className="flex-1 border border-zinc-300 rounded-lg px-3 py-1.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      ) : (
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-zinc-800 truncate">{member.name}</p>
+          <p className="text-[11px] text-zinc-400">{member.claimedBy ? `claimed by @${member.claimedBy}` : 'unclaimed'}</p>
+        </div>
+      )}
+      {editing ? (
+        <button onClick={() => { onRename(draft); setEditing(false) }} disabled={busy || !draft.trim()}
+          className="shrink-0 bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+          {busy ? <Spinner /> : 'Save'}
+        </button>
+      ) : (
+        <button onClick={() => { setDraft(member.name); setEditing(true) }} className="shrink-0 text-zinc-400 hover:text-zinc-700 p-1 rounded-lg hover:bg-zinc-100 transition-colors" title="Rename">
+          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+        </button>
       )}
     </div>
   )

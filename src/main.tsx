@@ -21,13 +21,25 @@ if ('serviceWorker' in navigator) {
   })
 }
 
-registerSW({
+const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
     // prompt-mode fallback — force the update through immediately
     window.location.reload()
+  },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return
+    // Check for a new deploy on every focus/visibility change and every 60s,
+    // so a long-open app still picks up updates without any manual action.
+    const check = () => registration.update().catch(() => {})
+    setInterval(check, 60_000)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') check()
+    })
   }
 })
+// Some browsers park a new SW in "waiting" — nudge it to activate immediately.
+void updateSW
 
 const queryClient = new QueryClient({
   defaultOptions: {

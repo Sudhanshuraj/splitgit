@@ -24,7 +24,7 @@ export async function hashExpense(e: HashableExpense): Promise<string> {
     amount: e.amount,
     currency: e.currency,
     paidBy: e.paidBy,
-    splits: e.splits.slice().sort((a, b) => a.username.localeCompare(b.username)),
+    splits: e.splits.slice().sort((a, b) => a.member - b.member),
     splitType: e.splitType,
     tags: e.tags.slice().sort(),
     date: e.date,

@@ -1,7 +1,7 @@
 // ─── Core domain types ────────────────────────────────────────────────────────
 
 export interface Split {
-  username: string
+  member: number       // ledger member id (references LedgerMember.id)
   amount: number
 }
 
@@ -11,7 +11,7 @@ export interface Expense {
   description: string
   amount: number
   currency: string
-  paidBy: string       // GitHub username
+  paidBy: number       // ledger member id
   splits: Split[]      // must sum to amount
   splitType: 'equal' | 'exact' | 'percentage'
   tags: string[]       // tag IDs (references TagConfig.id)
@@ -24,8 +24,8 @@ export interface Expense {
 export interface Settlement {
   id: string
   type: 'SETTLEMENT'
-  from: string         // GitHub username
-  to: string           // GitHub username
+  from: number         // ledger member id (payer)
+  to: number           // ledger member id (payee)
   amount: number
   currency: string
   note?: string
@@ -66,19 +66,11 @@ export interface Member {
 
 // ─── Balance computation ──────────────────────────────────────────────────────
 
-/** Net amount owed between two people. Positive = "from" owes "to". */
+/** Net amount owed between two ledger members. "from" owes "to". */
 export interface DebtEdge {
-  from: string
-  to: string
+  from: number
+  to: number
   amount: number
-  currency: string
-}
-
-/** Per-person net balance within a group */
-export interface Balance {
-  username: string
-  avatarUrl: string
-  net: number          // positive = is owed, negative = owes
   currency: string
 }
 
@@ -99,17 +91,28 @@ export interface TagConfig {
   emoji?: string      // optional emoji prefix e.g. "🍔" — can be changed freely
 }
 
+/**
+ * A ledger member = a person who appears in expenses. Identified by a stable
+ * numeric id that transactions reference. `name` is the display label and can
+ * be renamed freely. `claimedBy` links this slot to a GitHub account (login)
+ * once someone claims it — so their in-app actions attribute to this slot.
+ */
+export interface LedgerMember {
+  id: number
+  name: string
+  claimedBy?: string   // GitHub login of the account that owns this slot
+}
+
 export interface GroupConfig {
-  version: 2
+  version: 3
   tags: TagConfig[]
-  /** Per-group display names: GitHub login → nickname. Optional. */
-  nicknames?: Record<string, string>
+  members: LedgerMember[]
 }
 
 export const DEFAULT_GROUP_CONFIG: GroupConfig = {
-  version: 2,
+  version: 3,
   tags: [],
-  nicknames: {}
+  members: []
 }
 
 // ─── Offline queue ────────────────────────────────────────────────────────────

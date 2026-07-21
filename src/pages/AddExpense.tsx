@@ -1,13 +1,13 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { addExpense } from '../lib/eventLog'
-import { listMembers, getGroupConfig } from '../lib/github'
+import { getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
+import { memberName, memberInitial, myMemberId } from '../lib/members'
 import { Spinner } from '../components/Spinner'
 import { DatePicker } from '../components/DatePicker'
-import { handleOf } from '../lib/names'
 
 const CURRENCY = 'INR'
 
@@ -20,26 +20,25 @@ export function AddExpense() {
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const currency = CURRENCY
-  const [paidBy, setPaidBy] = useState(user?.login ?? '')
-  const [participants, setParticipants] = useState<Set<string>>(
-    new Set(user ? [user.login] : [])
-  )
   const [selectedTag, setSelectedTag] = useState<string>('')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paidBy, setPaidBy] = useState<number | null>(null)
+  const [participants, setParticipants] = useState<Set<number> | null>(null)
 
-  const { data: members, isLoading: membersLoading } = useQuery({
-    queryKey: ['members', owner, repo],
-    queryFn: () => listMembers(octokit!, owner!, repo!),
-    enabled: !!octokit && !!owner && !!repo
-  })
-
-  const { data: configData } = useQuery({
+  const { data: configData, isLoading } = useQuery({
     queryKey: ['config', owner, repo],
     queryFn: () => getGroupConfig(octokit!, owner!, repo!),
     enabled: !!octokit && !!owner && !!repo
   })
 
-  const tags = configData?.config.tags ?? []
+  const config = configData?.config
+  const members = config?.members ?? []
+  const tags = config?.tags ?? []
+
+  // Defaults once config loads: pay = my slot (or first), split among everyone
+  const defaultPaidBy = useMemo(() => myMemberId(config, user?.login) ?? members[0]?.id ?? null, [config, user, members])
+  const effectivePaidBy = paidBy ?? defaultPaidBy
+  const effectiveParticipants = participants ?? new Set(members.map(m => m.id))
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -47,8 +46,8 @@ export function AddExpense() {
         description: description.trim(),
         amount: parseFloat(amount),
         currency,
-        paidBy,
-        participants: Array.from(participants),
+        paidBy: effectivePaidBy!,
+        participants: Array.from(effectiveParticipants),
         splitType: 'equal',
         tags: selectedTag ? [selectedTag] : [],
         date
@@ -60,22 +59,32 @@ export function AddExpense() {
   })
 
   const parsedAmount = parseFloat(amount)
-  const perPerson = participants.size > 0 && !isNaN(parsedAmount)
-    ? parsedAmount / participants.size : 0
+  const perPerson = effectiveParticipants.size > 0 && !isNaN(parsedAmount)
+    ? parsedAmount / effectiveParticipants.size : 0
 
   const isValid =
     description.trim().length > 0 &&
     !isNaN(parsedAmount) && parsedAmount > 0 &&
-    paidBy !== '' && participants.size > 0 &&
+    effectivePaidBy != null && effectiveParticipants.size > 0 &&
     (tags.length === 0 || selectedTag !== '')
 
-  function toggleParticipant(login: string) {
-    setParticipants(prev => {
-      const next = new Set(prev)
-      if (next.has(login)) next.delete(login)
-      else next.add(login)
-      return next
-    })
+  function toggleParticipant(id: number) {
+    const base = participants ?? new Set(members.map(m => m.id))
+    const next = new Set(base)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setParticipants(next)
+  }
+
+  if (isLoading) return <Spinner className="py-16" />
+
+  if (members.length === 0) {
+    return (
+      <div className="text-center py-16 text-zinc-500">
+        <p className="text-4xl mb-3">👤</p>
+        <p className="font-medium text-zinc-700">No members yet</p>
+        <p className="text-sm mt-1">Add members in Group Settings first.</p>
+      </div>
+    )
   }
 
   return (
@@ -92,12 +101,9 @@ export function AddExpense() {
       <div className="space-y-5">
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">What was it for?</label>
-          <input
-            type="text" value={description} onChange={e => setDescription(e.target.value)}
-            placeholder="e.g. Dinner at Nobu"
-            className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
-            autoFocus
-          />
+          <input type="text" value={description} onChange={e => setDescription(e.target.value)}
+            placeholder="e.g. Dinner at Nobu" autoFocus
+            className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base" />
         </div>
 
         <div>
@@ -109,11 +115,9 @@ export function AddExpense() {
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">Amount (₹)</label>
           <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
             placeholder="0.00" min="0.01" step="0.01"
-            className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base"
-          />
+            className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base" />
         </div>
 
-        {/* Tag — single required selection (stored as tag ID) */}
         {tags.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-zinc-700 mb-1.5">
@@ -123,14 +127,10 @@ export function AddExpense() {
               {tags.map(tag => {
                 const selected = selectedTag === tag.id
                 return (
-                  <button key={tag.id} type="button"
-                    onClick={() => setSelectedTag(selected ? '' : tag.id)}
+                  <button key={tag.id} type="button" onClick={() => setSelectedTag(selected ? '' : tag.id)}
                     className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-all
-                      ${selected
-                        ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
-                        : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
-                    {tag.emoji && <span>{tag.emoji}</span>}
-                    {tag.name}
+                      ${selected ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
+                    {tag.emoji && <span>{tag.emoji}</span>}{tag.name}
                   </button>
                 )
               })}
@@ -140,54 +140,47 @@ export function AddExpense() {
 
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">Paid by</label>
-          {membersLoading ? <Spinner className="py-4" /> : (
-            <div className="flex flex-wrap gap-2">
-              {(members ?? []).map(m => (
-                <button key={m.login} onClick={() => setPaidBy(m.login)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors
-                    ${paidBy === m.login ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
-                  <img src={m.avatarUrl} alt={m.login} className="w-5 h-5 rounded-full" />
-                  {handleOf(m.login, configData?.config)}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {members.map(m => (
+              <button key={m.id} onClick={() => setPaidBy(m.id)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors
+                  ${effectivePaidBy === m.id ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
+                <span className="w-5 h-5 rounded-full bg-zinc-200 text-zinc-600 text-[10px] font-bold flex items-center justify-center">{memberInitial(m.id, config)}</span>
+                {m.name}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">
             Split between <span className="text-zinc-400 font-normal text-xs">(equal split)</span>
           </label>
-          {membersLoading ? <Spinner className="py-4" /> : (
-            <div className="space-y-2">
-              {(members ?? []).map(m => (
-                <button key={m.login} onClick={() => toggleParticipant(m.login)}
+          <div className="space-y-2">
+            {members.map(m => {
+              const on = effectiveParticipants.has(m.id)
+              return (
+                <button key={m.id} onClick={() => toggleParticipant(m.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-sm transition-colors
-                    ${participants.has(m.login) ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-zinc-200 hover:border-zinc-300'}`}>
+                    ${on ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-zinc-200 hover:border-zinc-300'}`}>
                   <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors
-                    ${participants.has(m.login) ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-300'}`}>
-                    {participants.has(m.login) && (
-                      <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M2 6l3 3 5-5" />
-                      </svg>
-                    )}
+                    ${on ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-300'}`}>
+                    {on && <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 6l3 3 5-5" /></svg>}
                   </div>
-                  <img src={m.avatarUrl} alt={m.login} className="w-7 h-7 rounded-full" />
-                  <span className="font-medium text-zinc-800">{handleOf(m.login, configData?.config)}</span>
-                  {participants.has(m.login) && perPerson > 0 && (
-                    <span className="ml-auto text-emerald-600 font-semibold">{formatAmount(perPerson, currency)}</span>
-                  )}
+                  <span className="w-7 h-7 rounded-full bg-zinc-200 text-zinc-600 text-xs font-bold flex items-center justify-center">{memberInitial(m.id, config)}</span>
+                  <span className="font-medium text-zinc-800">{m.name}</span>
+                  {on && perPerson > 0 && <span className="ml-auto text-emerald-600 font-semibold">{formatAmount(perPerson, currency)}</span>}
                 </button>
-              ))}
-            </div>
-          )}
+              )
+            })}
+          </div>
         </div>
 
         {isValid && (
           <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-4 text-sm text-zinc-600">
-            <span className="font-medium text-zinc-900">{handleOf(paidBy, configData?.config)}</span> paid{' '}
+            <span className="font-medium text-zinc-900">{memberName(effectivePaidBy!, config)}</span> paid{' '}
             <span className="font-medium text-zinc-900">{formatAmount(parsedAmount, currency)}</span>
-            {' '}for {participants.size} people. Each owes{' '}
+            {' '}for {effectiveParticipants.size} people. Each owes{' '}
             <span className="font-medium text-emerald-600">{formatAmount(perPerson, currency)}</span>.
             {selectedTag && <span className="ml-1">Tagged: {tags.find(t => t.id === selectedTag)?.name ?? selectedTag}.</span>}
           </div>

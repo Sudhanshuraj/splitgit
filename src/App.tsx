@@ -42,7 +42,7 @@ export function App() {
               amount: e.amount,
               currency: e.currency,
               paidBy: e.paidBy,
-              participants: e.splits.map(s => s.username),
+              participants: e.splits.map(s => s.member),
               splitType: 'equal',
               tags: e.tags ?? [],
               date: e.date ?? e.createdAt.slice(0, 10)

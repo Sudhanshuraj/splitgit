@@ -38,8 +38,21 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Serve the app shell network-first: a fresh deploy is fetched on the
+        // next open (falling back to cache only when offline), so new features
+        // show up without ever clearing the cache.
+        navigateFallback: 'index.html',
         runtimeCaching: [
+          {
+            // HTML navigations — always try the network first
+            urlPattern: ({ request }: { request: Request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-shell',
+              networkTimeoutSeconds: 5,
+              expiration: { maxEntries: 10 }
+            }
+          },
           {
             urlPattern: /^https:\/\/api\.github\.com\/.*/i,
             handler: 'NetworkFirst',
