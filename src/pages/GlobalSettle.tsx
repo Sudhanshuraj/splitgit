@@ -70,16 +70,20 @@ export function GlobalSettle() {
 
   const settleMutation = useMutation({
     mutationFn: async () => {
-      if (!settling || !chosenGroup || !octokit || !user) return
+      if (!settling || !chosenGroup || !octokit || !user) return null
       const cfg = configQueries[groups.findIndex(g => g.owner === chosenGroup.owner && g.name === chosenGroup.name)]?.data?.config as GroupConfig | undefined
       const fromId = myMemberId(cfg ?? null, user.login)
       const toId = cfg?.members.find(m => m.claimedBy === settling.toLogin)?.id
       if (fromId == null || toId == null) throw new Error('Both people must have claimed a member slot in that group')
-      await addSettlement(octokit, chosenGroup.owner, chosenGroup.name, {
+      const res = await addSettlement(octokit, chosenGroup.owner, chosenGroup.name, {
         from: fromId, to: toId, amount: settling.amount, currency: settling.currency, note: note.trim() || undefined
       })
+      return { res, owner: chosenGroup.owner, name: chosenGroup.name }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['events'] }); setSettling(null); setChosenGroup(null); setNote('') }
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(['events', data.owner, data.name], { events: data.res.events, sha: data.res.sha })
+      setSettling(null); setChosenGroup(null); setNote('')
+    }
   })
 
   function openSettle(edge: CrossGroupDebtEdge) {

@@ -71,18 +71,29 @@ export async function readEventsCached(
 
 // ─── Append event ─────────────────────────────────────────────────────────────
 
+export interface WriteResult { events: Event[]; sha: string }
+
+/**
+ * Append one event in a single commit.
+ * Fast path: use the locally cached events + sha (no read round-trip). Only if
+ * GitHub rejects the sha (someone else wrote concurrently) do we re-read and
+ * retry. Returns the updated events + the NEW file sha so callers can refresh
+ * their in-memory cache instantly instead of re-fetching (which can be stale).
+ */
 async function appendEvent(
   octokit: Octokit,
   owner: string,
   repo: string,
   newEvent: Event,
   retries = 5
-): Promise<void> {
+): Promise<WriteResult> {
   for (let attempt = 0; attempt < retries; attempt++) {
-    // Always fetch fresh from GitHub on retry so we get the latest SHA
-    if (attempt > 0) await invalidateCachedEventsForRetry(owner, repo)
+    let events: Event[]
+    let sha: string
+    const cached = attempt === 0 ? await getCachedEvents(owner, repo) : null
+    if (cached) { events = cached.events; sha = cached.sha }
+    else { const r = await readEvents(octokit, owner, repo); events = r.events; sha = r.sha }
 
-    const { events, sha } = await readEvents(octokit, owner, repo)
     const updated = [...events, newEvent]
     try {
       const message =
@@ -91,18 +102,19 @@ async function appendEvent(
           : newEvent.type === 'EXPENSE_DELETION'
           ? `delete: expense ${(newEvent as ExpenseDeletion).deletedId.slice(0, 8)}`
           : `settle: ${(newEvent as Settlement).from} → ${(newEvent as Settlement).to} — ${(newEvent as Settlement).amount}`
-      await updateExpensesFile(octokit, owner, repo, serializeNDJSON(updated), sha, message)
-      await setCachedEvents(owner, repo, sha, updated)
-      return
+      const newSha = await updateExpensesFile(octokit, owner, repo, serializeNDJSON(updated), sha, message)
+      await setCachedEvents(owner, repo, newSha, updated)
+      return { events: updated, sha: newSha }
     } catch (err: unknown) {
       // GitHub returns 409 for ref conflicts and 422 for SHA mismatches — both are retryable
       const msg = err instanceof Error ? err.message : ''
       const isRetryable = msg.includes('409') || msg.includes('422') || msg.includes('does not match')
       if (!isRetryable || attempt === retries - 1) throw err
-      // Back off before retrying: 500ms, 1s, 1.5s, 2s
-      await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
+      await invalidateCachedEventsForRetry(owner, repo)   // force fresh read next attempt
+      await new Promise(r => setTimeout(r, 300 * (attempt + 1)))
     }
   }
+  throw new Error('appendEvent: exhausted retries')
 }
 
 // ─── Edit event (append-only: adds an EDIT correction record) ─────────────────
@@ -119,7 +131,7 @@ export async function editExpense(
   repo: string,
   originalId: string,
   input: CreateExpenseInput
-): Promise<Expense> {
+): Promise<WriteResult & { expense: Expense }> {
   const id = uuidv4()
   const createdAt = new Date().toISOString()
 
@@ -150,8 +162,8 @@ export async function editExpense(
   const hash = await hashExpense(base)
   const expense: Expense = { ...base, hash }
 
-  await appendEvent(octokit, owner, repo, expense)
-  return expense
+  const res = await appendEvent(octokit, owner, repo, expense)
+  return { ...res, expense }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -172,7 +184,7 @@ export async function addExpense(
   owner: string,
   repo: string,
   input: CreateExpenseInput
-): Promise<Expense> {
+): Promise<WriteResult & { expense: Expense }> {
   const id = uuidv4()
   const createdAt = new Date().toISOString()
 
@@ -202,8 +214,8 @@ export async function addExpense(
   const hash = await hashExpense(base)
   const expense: Expense = { ...base, hash }
 
-  await appendEvent(octokit, owner, repo, expense)
-  return expense
+  const res = await appendEvent(octokit, owner, repo, expense)
+  return { ...res, expense }
 }
 
 export interface CreateSettlementInput {
@@ -219,7 +231,7 @@ export async function addSettlement(
   owner: string,
   repo: string,
   input: CreateSettlementInput
-): Promise<Settlement> {
+): Promise<WriteResult & { settlement: Settlement }> {
   const id = uuidv4()
   const createdAt = new Date().toISOString()
 
@@ -237,8 +249,8 @@ export async function addSettlement(
   const hash = await hashSettlement(base)
   const settlement: Settlement = { ...base, hash }
 
-  await appendEvent(octokit, owner, repo, settlement)
-  return settlement
+  const res = await appendEvent(octokit, owner, repo, settlement)
+  return { ...res, settlement }
 }
 
 // ─── Delete event (append-only: adds an EXPENSE_DELETION record) ──────────────
@@ -249,13 +261,13 @@ export async function deleteExpense(
   repo: string,
   expenseId: string,
   deletedBy: string
-): Promise<void> {
+): Promise<WriteResult> {
   const id = uuidv4()
   const createdAt = new Date().toISOString()
   const base = { id, type: 'EXPENSE_DELETION' as const, deletedId: expenseId, deletedBy, createdAt }
   const hash = await hashDeletion(base)
   const deletion: ExpenseDeletion = { ...base, hash }
-  await appendEvent(octokit, owner, repo, deletion)
+  return appendEvent(octokit, owner, repo, deletion)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -273,19 +285,19 @@ async function appendEvents(
   repo: string,
   events: Event[],
   retries = 5
-): Promise<void> {
-  if (events.length === 0) return
+): Promise<WriteResult> {
+  if (events.length === 0) { const r = await readEvents(octokit, owner, repo); return r }
   for (let attempt = 0; attempt < retries; attempt++) {
     if (attempt > 0) await invalidateCachedEventsForRetry(owner, repo)
     const { events: existing, sha } = await readEvents(octokit, owner, repo)
     const updated = [...existing, ...events]
     try {
-      await updateExpensesFile(
+      const newSha = await updateExpensesFile(
         octokit, owner, repo, serializeNDJSON(updated), sha,
         `import: ${events.length} event${events.length === 1 ? '' : 's'}`
       )
-      await setCachedEvents(owner, repo, sha, updated)
-      return
+      await setCachedEvents(owner, repo, newSha, updated)
+      return { events: updated, sha: newSha }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : ''
       const isRetryable = msg.includes('409') || msg.includes('422') || msg.includes('does not match')
@@ -293,6 +305,7 @@ async function appendEvents(
       await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
     }
   }
+  throw new Error('appendEvents: exhausted retries')
 }
 
 // ─── CSV import ────────────────────────────────────────────────────────────────

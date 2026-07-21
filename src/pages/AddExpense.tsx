@@ -52,8 +52,8 @@ export function AddExpense() {
         tags: selectedTag ? [selectedTag] : [],
         date
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events', owner, repo] })
+    onSuccess: (data) => {
+      qc.setQueryData(['events', owner, repo], { events: data.events, sha: data.sha })
       navigate(`/groups/${owner}/${repo}`)
     }
   })

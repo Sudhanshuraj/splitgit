@@ -32,6 +32,10 @@ export const GITHUB_OAUTH_CONFIG = {
   /** Your Cloudflare Worker URL that exchanges the code for a token */
   workerUrl: import.meta.env.VITE_OAUTH_WORKER_URL ?? 'https://your-worker.workers.dev/callback',
   /** Scopes needed: repo (to create/read private repos) + read:user */
+  // `repo` is required for private repos; `delete_repo` lets the owner delete a
+  // group from inside the app. Both are account-wide (a classic-OAuth limitation
+  // — GitHub can't scope to a single repo; that needs a GitHub App). GitHub still
+  // enforces per-repo admin, so a user can only ever delete repos they own.
   scope: 'repo delete_repo read:user user:email'
 }
 
@@ -251,8 +255,8 @@ export async function updateExpensesFile(
   content: string,
   sha: string,
   commitMessage: string
-): Promise<void> {
-  await octokit.rest.repos.createOrUpdateFileContents({
+): Promise<string> {
+  const { data } = await octokit.rest.repos.createOrUpdateFileContents({
     owner,
     repo,
     path: EXPENSES_FILE_PATH,
@@ -260,6 +264,8 @@ export async function updateExpensesFile(
     content: toBase64(content),
     sha
   })
+  // Return the new blob sha so callers can update their cache without a re-read
+  return (data.content as { sha: string }).sha
 }
 
 // ─── Group config (config.json) ───────────────────────────────────────────────

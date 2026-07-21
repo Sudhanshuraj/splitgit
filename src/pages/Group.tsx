@@ -80,7 +80,7 @@ export function Group() {
 
   const deleteMutation = useMutation({
     mutationFn: (expenseId: string) => deleteExpense(octokit!, owner!, repo!, expenseId, user!.login),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['events', owner, repo] }); setConfirmDeleteId(null) }
+    onSuccess: (data) => { qc.setQueryData(['events', owner, repo], { events: data.events, sha: data.sha }); setConfirmDeleteId(null) }
   })
 
   const events = eventData?.events ?? []

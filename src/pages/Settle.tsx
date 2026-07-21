@@ -46,8 +46,8 @@ export function Settle() {
       addSettlement(octokit!, owner!, repo!, {
         from: fromId!, to: to!, amount: parsedAmount, currency, note: note.trim() || undefined
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events', owner, repo] })
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(['events', owner, repo], { events: data.events, sha: data.sha })
       navigate(`/groups/${owner}/${repo}`)
     }
   })
@@ -98,6 +98,11 @@ export function Settle() {
             <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
               placeholder="0.00" min="0.01" step="0.01"
               className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base" />
+            {prefill?.amount != null && (
+              <p className="text-xs text-zinc-400 mt-1">
+                Full balance is {formatAmount(prefill.amount, currency)} — pay less for a partial settlement.
+              </p>
+            )}
           </div>
 
           <div>
