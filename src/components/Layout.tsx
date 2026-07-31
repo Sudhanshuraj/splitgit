@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
+import { useToast } from '../store/toast'
 import { applyTheme, getInitialTheme, type Theme } from '../lib/theme'
 
 interface LayoutProps {
@@ -10,6 +11,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuthStore()
   const location = useLocation()
+  const toast = useToast()
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
 
   function toggleTheme() {
@@ -60,6 +62,21 @@ export function Layout({ children }: LayoutProps) {
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-6 relative z-10">
         {children}
       </main>
+
+      {/* Background-save failure toast */}
+      {toast.message && (
+        <div className="fixed inset-x-0 bottom-20 z-[60] flex justify-center px-4">
+          <div className="bg-zinc-900 text-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-md w-full border border-white/10">
+            <span className="text-red-400 text-lg">⚠</span>
+            <span className="text-sm flex-1">{toast.message}</span>
+            {toast.retry && (
+              <button onClick={() => { toast.retry?.(); toast.dismiss() }}
+                className="text-emerald-400 font-semibold text-sm">Retry</button>
+            )}
+            <button onClick={toast.dismiss} className="text-zinc-400 hover:text-white text-sm">✕</button>
+          </div>
+        </div>
+      )}
 
       {/* Bottom nav (mobile) */}
       {user && (

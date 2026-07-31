@@ -6,7 +6,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { listGroups, createGroup, unarchiveGroup } from '../lib/github'
+import { listGroups, createGroup, unarchiveGroup, getGroupConfig } from '../lib/github'
+import { readEvents } from '../lib/eventLog'
 import { Spinner } from '../components/Spinner'
 import type { Group } from '../types'
 
@@ -223,12 +224,32 @@ function GroupCard({
   unarchiveError?: string
 }) {
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const { octokit } = useAuthStore()
   const isOwner = group.owner === currentUser
+
+  // Warm the cache the instant the user touches/hovers a card, so the group
+  // screen has its data ready by the time it opens.
+  function prefetch() {
+    if (group.archived || !octokit) return
+    qc.prefetchQuery({
+      queryKey: ['events', group.owner, group.name],
+      queryFn: () => readEvents(octokit, group.owner, group.name),
+      staleTime: 30_000
+    })
+    qc.prefetchQuery({
+      queryKey: ['config', group.owner, group.name],
+      queryFn: () => getGroupConfig(octokit, group.owner, group.name),
+      staleTime: 60_000
+    })
+  }
 
   return (
     <div className={`bg-white border rounded-2xl p-4 transition-all
       ${group.archived ? 'border-zinc-200 opacity-75' : 'border-zinc-200 hover:border-emerald-300 hover:shadow-sm cursor-pointer'}`}
       onClick={group.archived ? undefined : () => navigate(`/groups/${group.owner}/${group.name}`)}
+      onPointerEnter={prefetch}
+      onTouchStart={prefetch}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">

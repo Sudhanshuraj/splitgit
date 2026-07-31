@@ -103,6 +103,12 @@ async function appendEvent(
     if (cached) { events = cached.events; sha = cached.sha }
     else { const r = await readEvents(octokit, owner, repo); events = r.events; sha = r.sha }
 
+    // Idempotency: if this exact event id is already in the log, the write
+    // already landed (e.g. a retry after a lost response) — do not duplicate.
+    if (events.some(e => e.id === newEvent.id)) {
+      return { events, sha }
+    }
+
     const updated = [...events, newEvent]
     try {
       const message =
@@ -126,6 +132,49 @@ async function appendEvent(
   throw new Error('appendEvent: exhausted retries')
 }
 
+/** Public wrapper: commit a pre-built event (used by optimistic writes). */
+export async function appendOne(octokit: Octokit, owner: string, repo: string, event: Event): Promise<WriteResult> {
+  return appendEvent(octokit, owner, repo, event)
+}
+
+// ─── Event builders (construct the event locally, incl. hash) ──────────────────
+
+export async function buildExpense(input: CreateExpenseInput, supersedesId?: string): Promise<Expense> {
+  const id = uuidv4()
+  const createdAt = new Date().toISOString()
+  const splitAmount = parseFloat((input.amount / input.participants.length).toFixed(2))
+  const remainder = parseFloat((input.amount - splitAmount * input.participants.length).toFixed(2))
+  const splits = input.participants.map((member, i) => ({
+    member, amount: i === 0 ? parseFloat((splitAmount + remainder).toFixed(2)) : splitAmount
+  }))
+  const base = {
+    id, type: 'EXPENSE' as const, description: input.description, amount: input.amount,
+    currency: input.currency, paidBy: input.paidBy, splits, splitType: input.splitType,
+    tags: input.tags, date: input.date, ...(supersedesId ? { supersedesId } : {}), createdAt
+  }
+  const hash = await hashExpense(base)
+  return { ...base, hash }
+}
+
+export async function buildSettlement(input: CreateSettlementInput): Promise<Settlement> {
+  const id = uuidv4()
+  const createdAt = new Date().toISOString()
+  const base = {
+    id, type: 'SETTLEMENT' as const, from: input.from, to: input.to,
+    amount: input.amount, currency: input.currency, note: input.note, createdAt
+  }
+  const hash = await hashSettlement(base)
+  return { ...base, hash }
+}
+
+export async function buildDeletion(expenseId: string, deletedBy: string): Promise<ExpenseDeletion> {
+  const id = uuidv4()
+  const createdAt = new Date().toISOString()
+  const base = { id, type: 'EXPENSE_DELETION' as const, deletedId: expenseId, deletedBy, createdAt }
+  const hash = await hashDeletion(base)
+  return { ...base, hash }
+}
+
 // ─── Edit event (append-only: adds an EDIT correction record) ─────────────────
 
 /**
@@ -141,36 +190,7 @@ export async function editExpense(
   originalId: string,
   input: CreateExpenseInput
 ): Promise<WriteResult & { expense: Expense }> {
-  const id = uuidv4()
-  const createdAt = new Date().toISOString()
-
-  const splitAmount = parseFloat((input.amount / input.participants.length).toFixed(2))
-  const remainder = parseFloat(
-    (input.amount - splitAmount * input.participants.length).toFixed(2)
-  )
-  const splits = input.participants.map((member, i) => ({
-    member,
-    amount: i === 0 ? parseFloat((splitAmount + remainder).toFixed(2)) : splitAmount
-  }))
-
-  const base = {
-    id,
-    type: 'EXPENSE' as const,
-    description: input.description,
-    amount: input.amount,
-    currency: input.currency,
-    paidBy: input.paidBy,
-    splits,
-    splitType: input.splitType,
-    tags: input.tags,
-    date: input.date,
-    supersedesId: originalId,
-    createdAt
-  }
-
-  const hash = await hashExpense(base)
-  const expense: Expense = { ...base, hash }
-
+  const expense = await buildExpense(input, originalId)
   const res = await appendEvent(octokit, owner, repo, expense)
   return { ...res, expense }
 }
@@ -194,35 +214,7 @@ export async function addExpense(
   repo: string,
   input: CreateExpenseInput
 ): Promise<WriteResult & { expense: Expense }> {
-  const id = uuidv4()
-  const createdAt = new Date().toISOString()
-
-  const splitAmount = parseFloat((input.amount / input.participants.length).toFixed(2))
-  const remainder = parseFloat(
-    (input.amount - splitAmount * input.participants.length).toFixed(2)
-  )
-  const splits = input.participants.map((member, i) => ({
-    member,
-    amount: i === 0 ? parseFloat((splitAmount + remainder).toFixed(2)) : splitAmount
-  }))
-
-  const base = {
-    id,
-    type: 'EXPENSE' as const,
-    description: input.description,
-    amount: input.amount,
-    currency: input.currency,
-    paidBy: input.paidBy,
-    splits,
-    splitType: input.splitType,
-    tags: input.tags,
-    date: input.date,
-    createdAt
-  }
-
-  const hash = await hashExpense(base)
-  const expense: Expense = { ...base, hash }
-
+  const expense = await buildExpense(input)
   const res = await appendEvent(octokit, owner, repo, expense)
   return { ...res, expense }
 }
@@ -241,23 +233,7 @@ export async function addSettlement(
   repo: string,
   input: CreateSettlementInput
 ): Promise<WriteResult & { settlement: Settlement }> {
-  const id = uuidv4()
-  const createdAt = new Date().toISOString()
-
-  const base = {
-    id,
-    type: 'SETTLEMENT' as const,
-    from: input.from,
-    to: input.to,
-    amount: input.amount,
-    currency: input.currency,
-    note: input.note,
-    createdAt
-  }
-
-  const hash = await hashSettlement(base)
-  const settlement: Settlement = { ...base, hash }
-
+  const settlement = await buildSettlement(input)
   const res = await appendEvent(octokit, owner, repo, settlement)
   return { ...res, settlement }
 }
@@ -271,11 +247,7 @@ export async function deleteExpense(
   expenseId: string,
   deletedBy: string
 ): Promise<WriteResult> {
-  const id = uuidv4()
-  const createdAt = new Date().toISOString()
-  const base = { id, type: 'EXPENSE_DELETION' as const, deletedId: expenseId, deletedBy, createdAt }
-  const hash = await hashDeletion(base)
-  const deletion: ExpenseDeletion = { ...base, hash }
+  const deletion = await buildDeletion(expenseId, deletedBy)
   return appendEvent(octokit, owner, repo, deletion)
 }
 

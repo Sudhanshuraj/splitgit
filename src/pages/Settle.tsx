@@ -4,9 +4,10 @@
  */
 import { useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { addSettlement } from '../lib/eventLog'
+import { buildSettlement } from '../lib/eventLog'
+import { optimisticAppend } from '../lib/optimistic'
 import { getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
 import { memberName, memberInitial, myMemberId } from '../lib/members'
@@ -41,16 +42,12 @@ export function Settle() {
   const parsedAmount = parseFloat(amount)
   const isValid = to != null && fromId != null && !isNaN(parsedAmount) && parsedAmount > 0 && to !== fromId
 
-  const mutation = useMutation({
-    mutationFn: () =>
-      addSettlement(octokit!, owner!, repo!, {
-        from: fromId!, to: to!, amount: parsedAmount, currency, note: note.trim() || undefined
-      }),
-    onSuccess: (data) => {
-      if (data) qc.setQueryData(['events', owner, repo], { events: data.events, sha: data.sha })
-      navigate(`/groups/${owner}/${repo}`)
-    }
-  })
+  async function save() {
+    if (!isValid) return
+    const event = await buildSettlement({ from: fromId!, to: to!, amount: parsedAmount, currency, note: note.trim() || undefined })
+    optimisticAppend(qc, octokit!, owner!, repo!, event, 'settlement')
+    navigate(`/groups/${owner}/${repo}`)
+  }
 
   if (isLoading) return <Spinner className="py-16" />
 
@@ -122,15 +119,9 @@ export function Settle() {
             </div>
           )}
 
-          {mutation.error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">
-              {mutation.error instanceof Error ? mutation.error.message : 'Failed to record settlement'}
-            </div>
-          )}
-
-          <button onClick={() => mutation.mutate()} disabled={!isValid || mutation.isPending}
+          <button onClick={save} disabled={!isValid}
             className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-2xl text-base transition-colors flex items-center justify-center gap-2">
-            {mutation.isPending ? <><Spinner /> Saving…</> : 'Record Settlement'}
+            Record Settlement
           </button>
         </div>
       )}

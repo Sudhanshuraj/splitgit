@@ -7,7 +7,8 @@ import { useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { readEvents, resolveExpenses, deleteExpense } from '../lib/eventLog'
+import { readEvents, resolveExpenses, buildDeletion } from '../lib/eventLog'
+import { optimisticAppend } from '../lib/optimistic'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
 import { inviteMember, getGroupConfig, getRepoArchived } from '../lib/github'
 import { memberName, memberInitial, myMemberId } from '../lib/members'
@@ -77,10 +78,11 @@ export function Group() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['members', owner, repo] }); setShowInvite(false); setInviteUsername('') }
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: (expenseId: string) => deleteExpense(octokit!, owner!, repo!, expenseId, user!.login),
-    onSuccess: (data) => { qc.setQueryData(['events', owner, repo], { events: data.events, sha: data.sha }); setConfirmDeleteId(null) }
-  })
+  async function doDelete(expenseId: string) {
+    const event = await buildDeletion(expenseId, user!.login)
+    optimisticAppend(qc, octokit!, owner!, repo!, event, 'deletion')
+    setConfirmDeleteId(null)
+  }
 
   const events = eventData?.events ?? []
   const myId = myMemberId(config, user?.login)
@@ -216,12 +218,11 @@ export function Group() {
             <h2 className="text-xl font-bold text-zinc-900 mb-2">Delete Expense?</h2>
             <p className="text-sm text-zinc-500 mb-1">The expense will be hidden from balances and history.</p>
             <p className="text-xs text-zinc-400 mb-5">The original commit is preserved in git history.</p>
-            {deleteMutation.error && <p className="text-red-600 text-sm mb-3">{deleteMutation.error instanceof Error ? deleteMutation.error.message : 'Failed to delete'}</p>}
             <div className="flex gap-3">
-              <button onClick={() => { setConfirmDeleteId(null); deleteMutation.reset() }} className="flex-1 border border-zinc-300 text-zinc-700 font-medium py-3 rounded-xl hover:bg-zinc-50 transition-colors">Cancel</button>
-              <button onClick={() => deleteMutation.mutate(confirmDeleteId)} disabled={deleteMutation.isPending}
-                className="flex-1 bg-red-500 hover:bg-red-600 disabled:bg-zinc-300 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                {deleteMutation.isPending ? <Spinner /> : 'Delete'}
+              <button onClick={() => setConfirmDeleteId(null)} className="flex-1 border border-zinc-300 text-zinc-700 font-medium py-3 rounded-xl hover:bg-zinc-50 transition-colors">Cancel</button>
+              <button onClick={() => doDelete(confirmDeleteId)}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                Delete
               </button>
             </div>
           </div>

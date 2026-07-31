@@ -7,9 +7,10 @@
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { readEvents, editExpense } from '../lib/eventLog'
+import { readEvents, buildExpense } from '../lib/eventLog'
+import { optimisticAppend } from '../lib/optimistic'
 import { getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
 import { memberName, memberInitial, myMemberId } from '../lib/members'
@@ -70,23 +71,21 @@ export function EditExpense() {
 
   const tags = config?.tags ?? []
 
-  const mutation = useMutation({
-    mutationFn: () =>
-      editExpense(octokit!, owner!, repo!, expenseId!, {
-        description: description.trim(),
-        amount: parseFloat(amount),
-        currency,
-        paidBy: paidBy!,
-        participants: Array.from(participants),
-        splitType: 'equal',
-        tags: selectedTag ? [selectedTag] : [],
-        date
-      }),
-    onSuccess: (data) => {
-      qc.setQueryData(['events', owner, repo], { events: data.events, sha: data.sha })
-      navigate(`/groups/${owner}/${repo}`)
-    }
-  })
+  async function save() {
+    if (!isValid) return
+    const event = await buildExpense({
+      description: description.trim(),
+      amount: parseFloat(amount),
+      currency,
+      paidBy: paidBy!,
+      participants: Array.from(participants),
+      splitType: 'equal',
+      tags: selectedTag ? [selectedTag] : [],
+      date
+    }, expenseId!)
+    optimisticAppend(qc, octokit!, owner!, repo!, event, description.trim() || 'expense')
+    navigate(`/groups/${owner}/${repo}`)
+  }
 
   const parsedAmount = parseFloat(amount)
   const perPerson = participants.size > 0 && !isNaN(parsedAmount)
@@ -243,15 +242,9 @@ export function EditExpense() {
           </div>
         )}
 
-        {mutation.error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">
-            {mutation.error instanceof Error ? mutation.error.message : 'Failed to save edit'}
-          </div>
-        )}
-
-        <button onClick={() => mutation.mutate()} disabled={!isValid || mutation.isPending}
+        <button onClick={save} disabled={!isValid}
           className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-2xl text-base transition-colors flex items-center justify-center gap-2">
-          {mutation.isPending ? <><Spinner /> Saving…</> : 'Save Changes'}
+          Save Changes
         </button>
       </div>
     </div>
