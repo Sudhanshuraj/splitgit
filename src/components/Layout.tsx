@@ -24,9 +24,16 @@ export function Layout({ children }: LayoutProps) {
   ]
 
   return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col">
+    <div className="app-shell min-h-screen flex flex-col relative">
+      {/* Flowing liquid backdrop */}
+      <div className="liquid-bg" aria-hidden="true">
+        <span className="blob blob-1" />
+        <span className="blob blob-2" />
+        <span className="blob blob-3" />
+      </div>
+
       {/* Top header */}
-      <header className="bg-zinc-900 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+      <header className="glass-header text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50">
         <Link to="/groups" className="flex items-center gap-2 font-semibold text-lg">
           <span className="text-emerald-400 text-xl">⑂</span>
           SplitGit
@@ -50,13 +57,13 @@ export function Layout({ children }: LayoutProps) {
       </header>
 
       {/* Main content */}
-      <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-6">
+      <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-6 relative z-10">
         {children}
       </main>
 
       {/* Bottom nav (mobile) */}
       {user && (
-        <nav className="sticky bottom-0 bg-white border-t border-zinc-200 flex safe-bottom">
+        <nav className="sticky bottom-0 z-40 glass-nav flex safe-bottom">
           {navItems.map(item => (
             <Link
               key={item.path}
