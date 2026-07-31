@@ -175,6 +175,16 @@ export async function deleteGroup(
   await octokit.rest.repos.delete({ owner, repo })
 }
 
+/** Cheap single-repo archived check (avoids listing all repos + members). */
+export async function getRepoArchived(
+  octokit: Octokit,
+  owner: string,
+  repo: string
+): Promise<boolean> {
+  const { data } = await octokit.rest.repos.get({ owner, repo })
+  return data.archived ?? false
+}
+
 export async function archiveGroup(
   octokit: Octokit,
   owner: string,

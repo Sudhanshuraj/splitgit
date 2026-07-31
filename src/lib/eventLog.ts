@@ -50,8 +50,17 @@ export async function readEvents(
     return { events: cached.events, sha }
   }
 
-  // 3. SHA changed or no cache — parse and update cache
+  // 3. SHA changed or no cache — parse
   const events = parseNDJSON(content)
+
+  // Guard against GitHub's read-after-write lag: the event log is append-only,
+  // so it can only grow. If a fetch comes back SHORTER than what we already have
+  // locally, GitHub simply hasn't caught up yet — keep the newer local copy and
+  // don't clobber it. (A genuine change from another device has >= our length.)
+  if (cached && events.length < cached.events.length) {
+    return { events: cached.events, sha: cached.sha }
+  }
+
   await setCachedEvents(owner, repo, sha, events)
   return { events, sha }
 }

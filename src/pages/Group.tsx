@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { readEvents, resolveExpenses, deleteExpense } from '../lib/eventLog'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
-import { inviteMember, getGroupConfig, listGroups } from '../lib/github'
+import { inviteMember, getGroupConfig, getRepoArchived } from '../lib/github'
 import { memberName, memberInitial, myMemberId } from '../lib/members'
 import { Spinner } from '../components/Spinner'
 import { Analytics } from '../components/Analytics'
@@ -52,8 +52,8 @@ export function Group() {
     queryKey: ['events', owner, repo],
     queryFn: () => readEvents(octokit!, owner!, repo!),
     enabled: !!octokit && !!owner && !!repo,
-    staleTime: 10_000,
-    refetchOnWindowFocus: true
+    staleTime: 30_000,
+    refetchOnWindowFocus: false
   })
 
   const { data: configData } = useQuery({
@@ -65,13 +65,12 @@ export function Group() {
   const config = configData?.config
   const ledger = config?.members ?? []
 
-  const { data: groups } = useQuery({
-    queryKey: ['groups'],
-    queryFn: () => listGroups(octokit!),
-    enabled: !!octokit,
-    staleTime: 60_000
+  const { data: isArchived = false } = useQuery({
+    queryKey: ['repo-archived', owner, repo],
+    queryFn: () => getRepoArchived(octokit!, owner!, repo!),
+    enabled: !!octokit && !!owner && !!repo,
+    staleTime: 300_000
   })
-  const isArchived = groups?.find(g => g.owner === owner && g.name === repo)?.archived ?? false
 
   const inviteMutation = useMutation({
     mutationFn: (username: string) => inviteMember(octokit!, owner!, repo!, username),
