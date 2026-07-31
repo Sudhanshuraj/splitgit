@@ -5,6 +5,10 @@ import { BrowserRouter } from 'react-router-dom'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import { App } from './App'
+import { applyTheme, getInitialTheme } from './lib/theme'
+
+// Set theme before first paint to avoid a flash of the wrong palette
+applyTheme(getInitialTheme())
 
 // Auto-update: when a new version is deployed, activate it immediately and
 // reload the page so the new code runs. No manual cache clearing ever needed.

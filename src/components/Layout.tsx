@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
+import { applyTheme, getInitialTheme, type Theme } from '../lib/theme'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -8,6 +10,13 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuthStore()
   const location = useLocation()
+  const [theme, setTheme] = useState<Theme>(getInitialTheme)
+
+  function toggleTheme() {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    applyTheme(next)
+  }
 
   const navItems = [
     { path: '/groups', label: 'Groups', icon: '⑂' },
@@ -22,21 +31,22 @@ export function Layout({ children }: LayoutProps) {
           <span className="text-emerald-400 text-xl">⑂</span>
           SplitGit
         </Link>
-        {user && (
-          <div className="flex items-center gap-3">
-            <img
-              src={user.avatarUrl}
-              alt={user.login}
-              className="w-8 h-8 rounded-full border-2 border-zinc-600"
-            />
-            <button
-              onClick={logout}
-              className="text-zinc-400 hover:text-white text-sm transition-colors"
-            >
-              Sign out
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button onClick={toggleTheme} title="Toggle dark mode"
+            className="text-zinc-300 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10">
+            {theme === 'dark' ? (
+              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" /></svg>
+            ) : (
+              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" /></svg>
+            )}
+          </button>
+          {user && (
+            <>
+              <img src={user.avatarUrl} alt={user.login} className="w-8 h-8 rounded-full border-2 border-zinc-600" />
+              <button onClick={logout} className="text-zinc-400 hover:text-white text-sm transition-colors">Sign out</button>
+            </>
+          )}
+        </div>
       </header>
 
       {/* Main content */}
