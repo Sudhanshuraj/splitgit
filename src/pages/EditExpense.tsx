@@ -20,6 +20,13 @@ import type { Expense } from '../types'
 
 const CURRENCY = 'INR'
 
+/** True if every participant's share is (near) the equal share. */
+function isEqualSplit(e: Expense): boolean {
+  if (e.splits.length === 0) return true
+  const equal = e.amount / e.splits.length
+  return e.splits.every(s => Math.abs(s.amount - equal) < 0.01)
+}
+
 export function EditExpense() {
   const { owner, repo, expenseId } = useParams<{
     owner: string; repo: string; expenseId: string
@@ -71,6 +78,14 @@ export function EditExpense() {
 
   const tags = config?.tags ?? []
 
+  // Preserve the original split (which may be unequal/exact) unless the user
+  // actually changed the amount or who's involved — editing must never silently
+  // re-split a transaction and shift the balance.
+  const splitUnchanged = original != null &&
+    parseFloat(amount) === original.amount &&
+    participants.size === original.splits.length &&
+    original.splits.every(s => participants.has(s.member))
+
   async function save() {
     if (!isValid) return
     const event = await buildExpense({
@@ -79,10 +94,10 @@ export function EditExpense() {
       currency,
       paidBy: paidBy!,
       participants: Array.from(participants),
-      splitType: 'equal',
+      splitType: splitUnchanged ? (original!.splitType) : 'equal',
       tags: selectedTag ? [selectedTag] : [],
       date
-    }, expenseId!)
+    }, expenseId!, splitUnchanged ? original!.splits : undefined)
     optimisticAppend(qc, octokit!, owner!, repo!, event, description.trim() || 'expense')
     navigate(`/groups/${owner}/${repo}`)
   }
@@ -168,6 +183,11 @@ export function EditExpense() {
           <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
             min="0.01" step="0.01"
             className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base" />
+          {original && !splitUnchanged && !isEqualSplit(original) && (
+            <p className="text-xs text-amber-600 mt-1">
+              ⚠ This expense has an unequal split. Changing the amount or who's involved will re-split it equally.
+            </p>
+          )}
         </div>
 
         {/* Tag — single required selection */}

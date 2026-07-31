@@ -9,7 +9,7 @@ import { useState } from 'react'
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { listGroups, getGroupConfig } from '../lib/github'
-import { readEvents, addSettlement } from '../lib/eventLog'
+import { readEvents, addSettlement, resolveExpenses } from '../lib/eventLog'
 import { computeCrossGroupSettlements, formatAmount } from '../lib/balances'
 import { myMemberId } from '../lib/members'
 import type { CrossGroupDebtEdge, GroupEvents } from '../lib/balances'
@@ -52,9 +52,11 @@ export function GlobalSettle() {
   const allLoaded = eventQueries.length > 0 && eventQueries.every(q => !q.isLoading) && configQueries.every(q => !q.isLoading)
 
   const groupEvents: GroupEvents[] = groups.map((g, i) => {
-    const events = eventQueries[i]?.data?.events ?? []
+    const raw = eventQueries[i]?.data?.events ?? []
     const config = configQueries[i]?.data?.config as GroupConfig | undefined
-    const firstExpense = events.find(e => e.type === 'EXPENSE')
+    const firstExpense = raw.find(e => e.type === 'EXPENSE')
+    // Apply edits + deletions before computing balances (same as the group tab)
+    const events = [...resolveExpenses(raw), ...raw.filter(e => e.type === 'SETTLEMENT')]
     return {
       owner: g.owner,
       name: g.name,

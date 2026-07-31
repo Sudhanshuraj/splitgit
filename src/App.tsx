@@ -12,8 +12,7 @@ import { GroupSettings } from './pages/GroupSettings'
 import { EditExpense } from './pages/EditExpense'
 import { ImportCsv } from './pages/ImportCsv'
 import { getQueuedEvents, removeQueuedEvent, isOnline, onOnline } from './lib/offline'
-import { addExpense, addSettlement } from './lib/eventLog'
-import type { Expense, Settlement } from './types'
+import { appendOne } from './lib/eventLog'
 
 /** Guard: redirect to / if not authenticated */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -35,28 +34,10 @@ export function App() {
       const queued = await getQueuedEvents()
       for (const item of queued) {
         try {
-          if (item.event.type === 'EXPENSE') {
-            const e = item.event as Expense
-            await addExpense(octokit, item.groupOwner, item.groupName, {
-              description: e.description,
-              amount: e.amount,
-              currency: e.currency,
-              paidBy: e.paidBy,
-              participants: e.splits.map(s => s.member),
-              splitType: 'equal',
-              tags: e.tags ?? [],
-              date: e.date ?? e.createdAt.slice(0, 10)
-            })
-          } else {
-            const s = item.event as Settlement
-            await addSettlement(octokit, item.groupOwner, item.groupName, {
-              from: s.from,
-              to: s.to,
-              amount: s.amount,
-              currency: s.currency,
-              note: s.note
-            })
-          }
+          // Append the stored event verbatim — never rebuild it (that would
+          // re-split unequal expenses and corrupt balances). appendOne is
+          // idempotent, so a retry can't double-write.
+          await appendOne(octokit, item.groupOwner, item.groupName, item.event)
           await removeQueuedEvent(item.id)
         } catch {
           // Leave in queue; will retry next time

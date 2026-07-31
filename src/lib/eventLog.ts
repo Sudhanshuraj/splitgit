@@ -5,7 +5,7 @@
  */
 
 import { Octokit } from 'octokit'
-import type { Event, Expense, Settlement, ExpenseDeletion, TagConfig, LedgerMember } from '../types'
+import type { Event, Expense, Settlement, ExpenseDeletion, TagConfig, LedgerMember, Split } from '../types'
 import { getExpensesFile, updateExpensesFile, getGroupConfig, saveGroupConfig } from './github'
 import { hashExpense, hashSettlement, hashDeletion } from './hash'
 import { getCachedEvents, setCachedEvents, invalidateCachedEvents, invalidateCachedConfig } from './cache'
@@ -139,14 +139,28 @@ export async function appendOne(octokit: Octokit, owner: string, repo: string, e
 
 // ─── Event builders (construct the event locally, incl. hash) ──────────────────
 
-export async function buildExpense(input: CreateExpenseInput, supersedesId?: string): Promise<Expense> {
+/**
+ * Build an expense event. Normally the amount is split equally among
+ * `participants`. Pass `splitsOverride` to keep an existing (possibly unequal)
+ * split verbatim — used when editing an expense so exact splits aren't lost.
+ */
+export async function buildExpense(
+  input: CreateExpenseInput,
+  supersedesId?: string,
+  splitsOverride?: Split[]
+): Promise<Expense> {
   const id = uuidv4()
   const createdAt = new Date().toISOString()
-  const splitAmount = parseFloat((input.amount / input.participants.length).toFixed(2))
-  const remainder = parseFloat((input.amount - splitAmount * input.participants.length).toFixed(2))
-  const splits = input.participants.map((member, i) => ({
-    member, amount: i === 0 ? parseFloat((splitAmount + remainder).toFixed(2)) : splitAmount
-  }))
+  let splits: Split[]
+  if (splitsOverride) {
+    splits = splitsOverride.map(s => ({ member: s.member, amount: s.amount }))
+  } else {
+    const splitAmount = parseFloat((input.amount / input.participants.length).toFixed(2))
+    const remainder = parseFloat((input.amount - splitAmount * input.participants.length).toFixed(2))
+    splits = input.participants.map((member, i) => ({
+      member, amount: i === 0 ? parseFloat((splitAmount + remainder).toFixed(2)) : splitAmount
+    }))
+  }
   const base = {
     id, type: 'EXPENSE' as const, description: input.description, amount: input.amount,
     currency: input.currency, paidBy: input.paidBy, splits, splitType: input.splitType,
@@ -203,7 +217,7 @@ export interface CreateExpenseInput {
   currency: string
   paidBy: number          // ledger member id
   participants: number[]  // ledger member ids
-  splitType: 'equal'
+  splitType: 'equal' | 'exact' | 'percentage'
   tags: string[]
   date: string  // YYYY-MM-DD
 }
