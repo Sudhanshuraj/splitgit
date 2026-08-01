@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { v4 as uuidv4 } from 'uuid'
 import { useAuthStore } from '../store/auth'
 import { getGroupConfig, saveGroupConfig, archiveGroup, deleteGroup } from '../lib/github'
+import { readEvents } from '../lib/eventLog'
 import { invalidateCachedConfig, invalidateCachedEvents } from '../lib/cache'
 import { myMemberId, memberInitial, nextMemberId } from '../lib/members'
+import { buildExpensesCsv, buildSettlementsCsv, downloadCsv } from '../lib/exportCsv'
 import { Spinner } from '../components/Spinner'
 import type { TagConfig, GroupConfig, LedgerMember } from '../types'
 
@@ -45,6 +47,28 @@ export function GroupSettings() {
     queryFn: () => getGroupConfig(octokit!, owner!, repo!),
     enabled: !!octokit && !!owner && !!repo
   })
+
+  // Only fetched on demand when the user hits Export, so Settings doesn't
+  // pay for a full event-log read on every visit.
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  async function exportCsv() {
+    if (!octokit || !owner || !repo) return
+    setExporting(true)
+    setExportError(null)
+    try {
+      const { events } = await readEvents(octokit, owner, repo)
+      const expensesCsv = buildExpensesCsv(events, config)
+      const settlementsCsv = buildSettlementsCsv(events, config)
+      downloadCsv(`${repo}-expenses.csv`, expensesCsv)
+      downloadCsv(`${repo}-settlements.csv`, settlementsCsv)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Failed to export')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const config = configData?.config
   const ledger = config?.members ?? []
@@ -228,6 +252,26 @@ export function GroupSettings() {
               <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
             </svg>
           </button>
+
+          {/* Export CSV */}
+          <button
+            onClick={exportCsv}
+            disabled={exporting}
+            className="w-full flex items-center justify-between bg-white border border-zinc-200 rounded-2xl px-4 py-3 hover:border-emerald-300 hover:shadow-sm transition-all disabled:opacity-60">
+            <div className="flex items-center gap-3">
+              <span className="text-xl">📤</span>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-zinc-800">Export to CSV</p>
+                <p className="text-xs text-zinc-400">Downloads current expenses &amp; settlements as CSV files</p>
+              </div>
+            </div>
+            {exporting ? <Spinner /> : (
+              <svg className="w-5 h-5 text-zinc-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+              </svg>
+            )}
+          </button>
+          {exportError && <p className="text-red-600 text-sm -mt-3">{exportError}</p>}
 
           {/* Existing tags */}
           <div>
