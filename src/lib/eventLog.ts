@@ -407,3 +407,50 @@ export function resolveExpenses(events: Event[]): Expense[] {
     (!supersededBy.has(e.id) || supersededBy.get(e.id) === e.id) // latest version
   )
 }
+
+/**
+ * Follow the supersedesId chain from any id (old or current) to the current
+ * live version of that expense. Returns null if the expense (or its latest
+ * version) has been deleted.
+ *
+ * This exists because a user can land on an edit link for a version that has
+ * since been superseded by a newer edit (stale cache, old bookmark, a second
+ * tab, etc). Without this, editing that stale version would create a new
+ * event that supersedes the *old* ancestor instead of chaining onto the
+ * newest edit — producing two "live" versions of the same expense at once
+ * (a real-money duplicate). Always resolve to the tip of the chain before
+ * building a correction, and always supersede that tip's id, never the id
+ * that happened to be in the URL.
+ */
+export function findLatestExpense(events: Event[], anyId: string): Expense | null {
+  const expenses = events.filter(e => e.type === 'EXPENSE') as Expense[]
+  const byId = new Map(expenses.map(e => [e.id, e]))
+  const deletedIds = new Set(
+    events.filter(e => e.type === 'EXPENSE_DELETION').map(e => (e as ExpenseDeletion).deletedId)
+  )
+
+  // Map ancestor id -> all events that claim to supersede it. If more than
+  // one (the duplicate-edit bug above), prefer whichever was created most
+  // recently — that's the version the user most recently intended to keep.
+  const childrenOf = new Map<string, Expense[]>()
+  for (const e of expenses) {
+    if (e.supersedesId) {
+      const arr = childrenOf.get(e.supersedesId) ?? []
+      arr.push(e)
+      childrenOf.set(e.supersedesId, arr)
+    }
+  }
+
+  let current = byId.get(anyId)
+  if (!current) return null
+
+  const visited = new Set<string>()
+  while (!visited.has(current.id)) {
+    visited.add(current.id)
+    const children = childrenOf.get(current.id)
+    if (!children || children.length === 0) break
+    current = children.reduce((a, b) => (a.createdAt > b.createdAt ? a : b))
+  }
+
+  return deletedIds.has(current.id) ? null : current
+}

@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { readEvents, buildExpense } from '../lib/eventLog'
+import { readEvents, buildExpense, findLatestExpense } from '../lib/eventLog'
 import { optimisticAppend } from '../lib/optimistic'
 import { getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
@@ -60,10 +60,14 @@ export function EditExpense() {
   const config = configData?.config
   const members = config?.members ?? []
 
-  // Find the expense and pre-fill form once loaded
-  const original = eventData?.events
-    .filter(e => e.type === 'EXPENSE')
-    .find(e => e.id === expenseId) as Expense | undefined
+  // Resolve to the CURRENT version of this expense — expenseId in the URL may
+  // point at a version that's since been superseded by a newer edit (stale
+  // cache, old link, another tab). Always edit the latest, never a stale
+  // ancestor — see findLatestExpense() for why this matters for real money.
+  const original = eventData
+    ? findLatestExpense(eventData.events, expenseId!) ?? undefined
+    : undefined
+  const isStaleLink = !!original && original.id !== expenseId
 
   useEffect(() => {
     if (!original || loaded) return
@@ -97,7 +101,7 @@ export function EditExpense() {
       splitType: splitUnchanged ? (original!.splitType) : 'equal',
       tags: selectedTag ? [selectedTag] : [],
       date
-    }, expenseId!, splitUnchanged ? original!.splits : undefined)
+    }, original!.id, splitUnchanged ? original!.splits : undefined)
     optimisticAppend(qc, octokit!, owner!, repo!, event, description.trim() || 'expense')
     navigate(`/groups/${owner}/${repo}`)
   }
@@ -165,6 +169,12 @@ export function EditExpense() {
         The original is preserved in history and linked via{' '}
         <code className="bg-amber-100 px-1 rounded">supersedesId</code>.
       </div>
+
+      {isStaleLink && (
+        <div className="mb-5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
+          This expense was edited again since you last viewed it — you're editing the latest version, so nothing gets duplicated.
+        </div>
+      )}
 
       <div className="space-y-5">
         <div>
