@@ -163,9 +163,10 @@ interface AnalyticsProps {
   tags: TagConfig[]
   currency: string
   config?: GroupConfig | null
+  onSelectExpense?: (e: Expense) => void
 }
 
-export function Analytics({ events, tags, currency, config }: AnalyticsProps) {
+export function Analytics({ events, tags, currency, config, onSelectExpense }: AnalyticsProps) {
   const [preset, setPreset] = useState<RangePreset>('this-month')
   const [customFrom, setCustomFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10) })
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10))
@@ -368,7 +369,8 @@ export function Analytics({ events, tags, currency, config }: AnalyticsProps) {
               ) : shownTx.map((e, i) => {
                 const tag = tagById.get(e.tags[0] ?? '')
                 return (
-                  <div key={i} className="flex items-center gap-3 px-4 py-3">
+                  <button key={i} onClick={() => onSelectExpense?.(e)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-zinc-800 truncate">{e.description}</p>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -382,7 +384,7 @@ export function Analytics({ events, tags, currency, config }: AnalyticsProps) {
                       </div>
                     </div>
                     <p className="text-sm font-semibold text-zinc-900 shrink-0">{formatAmount(e.amount, currency)}</p>
-                  </div>
+                  </button>
                 )
               })}
             </div>

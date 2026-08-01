@@ -14,6 +14,7 @@ import { inviteMember, getGroupConfig, getRepoArchived } from '../lib/github'
 import { memberName, memberInitial, myMemberId, isPayer, payerLabel } from '../lib/members'
 import { Spinner } from '../components/Spinner'
 import { Analytics } from '../components/Analytics'
+import { TransactionDetailModal } from '../components/TransactionDetailModal'
 import type { Event, Expense, Settlement, ExpenseDeletion, ConfigChange, TagConfig, GroupConfig } from '../types'
 
 type HistRange = 'all' | 'this-month' | 'last-month' | 'this-year'
@@ -48,6 +49,8 @@ export function Group() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [histRange, setHistRange] = useState<HistRange>('all')
   const [histTag, setHistTag] = useState<string>('all')
+  const [histSearch, setHistSearch] = useState('')
+  const [detailEvent, setDetailEvent] = useState<Event | null>(null)
 
   const { data: eventData, isLoading: eventsLoading } = useQuery({
     queryKey: ['events', owner, repo],
@@ -112,13 +115,18 @@ export function Group() {
   // History: filtered + grouped by month
   const monthGroups = useMemo(() => {
     const visible = [...events].reverse().filter(e =>
-      e.type !== 'EXPENSE_DELETION' && !supersededIds.has(e.id) && !deletedExpenseIds.has(e.id)
+      (e.type === 'EXPENSE' || e.type === 'SETTLEMENT') && !supersededIds.has(e.id) && !deletedExpenseIds.has(e.id)
     )
+    const q = histSearch.trim().toLowerCase()
     const filtered = visible.filter(e => {
       if (!inRange(eventDate(e), histRange)) return false
       if (histTag !== 'all') {
         if (e.type !== 'EXPENSE') return false
-        return (e as Expense).tags[0] === histTag
+        if ((e as Expense).tags[0] !== histTag) return false
+      }
+      if (q) {
+        if (e.type === 'EXPENSE') { if (!(e as Expense).description.toLowerCase().includes(q)) return false }
+        else return false
       }
       return true
     })
@@ -132,7 +140,7 @@ export function Group() {
       groupsMap.get(key)!.items.push(e)
     }
     return [...groupsMap.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([, v]) => v)
-  }, [events, histRange, histTag, supersededIds, deletedExpenseIds])
+  }, [events, histRange, histTag, histSearch, supersededIds, deletedExpenseIds])
 
   // Activity: every event (adds, edits, deletions, settlements, config
   // changes) in the exact order it was actually committed — unlike History,
@@ -300,6 +308,14 @@ export function Group() {
       {/* History */}
       {!eventsLoading && activeTab === 'history' && (
         <div>
+          {/* Search */}
+          <div className="relative mb-3">
+            <svg className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
+            </svg>
+            <input type="text" value={histSearch} onChange={e => setHistSearch(e.target.value)} placeholder="Search description…"
+              className="w-full border border-zinc-200 rounded-xl pl-9 pr-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white" />
+          </div>
           {/* Filters */}
           <div className="flex flex-wrap gap-2 mb-3">
             {([['all', 'All'], ['this-month', 'This Month'], ['last-month', 'Last Month'], ['this-year', 'This Year']] as [HistRange, string][]).map(([k, label]) => (
@@ -334,9 +350,7 @@ export function Group() {
                       {group.items.map(event => (
                         <EventRow key={event.id} event={event} tags={config?.tags ?? []} config={config ?? null}
                           isEdited={correctedIds.has(event.id)}
-                          canEdit={event.type === 'EXPENSE' && ((myId != null && isPayer(event as Expense, myId)) || isOwner)}
-                          editUrl={`/groups/${owner}/${repo}/edit/${event.id}`}
-                          onDelete={event.type === 'EXPENSE' && ((myId != null && isPayer(event as Expense, myId)) || isOwner) ? () => setConfirmDeleteId(event.id) : undefined}
+                          onOpenDetail={() => setDetailEvent(event)}
                         />
                       ))}
                     </div>
@@ -360,7 +374,8 @@ export function Group() {
                   <h3 className="text-sm font-bold text-zinc-700 mb-2 px-1">{group.label}</h3>
                   <div className="space-y-2">
                     {group.items.map(event => (
-                      <ActivityRow key={event.id} event={event} config={config ?? null} expenseById={expenseById} />
+                      <ActivityRow key={event.id} event={event} config={config ?? null} expenseById={expenseById}
+                        onOpenDetail={(event.type === 'EXPENSE' || event.type === 'SETTLEMENT') ? () => setDetailEvent(event) : undefined} />
                     ))}
                   </div>
                 </div>
@@ -372,22 +387,35 @@ export function Group() {
 
       {/* Analytics */}
       {!eventsLoading && activeTab === 'analytics' && (
-        <Analytics events={effectiveEvents} tags={config?.tags ?? []} currency={defaultCurrency} config={config ?? null} />
+        <Analytics events={effectiveEvents} tags={config?.tags ?? []} currency={defaultCurrency} config={config ?? null}
+          onSelectExpense={e => setDetailEvent(e)} />
+      )}
+
+      {/* Shared transaction detail modal — same view everywhere: History, Activity, Analytics */}
+      {detailEvent && (
+        <TransactionDetailModal
+          event={detailEvent}
+          config={config ?? null}
+          tags={config?.tags ?? []}
+          canEdit={detailEvent.type === 'EXPENSE' && ((myId != null && isPayer(detailEvent as Expense, myId)) || isOwner)}
+          editUrl={`/groups/${owner}/${repo}/edit/${detailEvent.id}`}
+          onDelete={detailEvent.type === 'EXPENSE' ? () => setConfirmDeleteId(detailEvent.id) : undefined}
+          onClose={() => setDetailEvent(null)}
+          originalExpense={detailEvent.type === 'EXPENSE_DELETION' ? expenseById.get((detailEvent as ExpenseDeletion).deletedId) ?? null : undefined}
+        />
       )}
     </div>
   )
 }
 
 function EventRow({
-  event, tags, config, isEdited = false, canEdit = false, editUrl = '', onDelete
+  event, tags, config, isEdited = false, onOpenDetail
 }: {
   event: Event
   tags: TagConfig[]
   config: GroupConfig | null
   isEdited?: boolean
-  canEdit?: boolean
-  editUrl?: string
-  onDelete?: () => void
+  onOpenDetail: () => void
 }) {
   const tagById = new Map(tags.map(t => [t.id, t]))
   const d = eventDate(event)
@@ -396,7 +424,8 @@ function EventRow({
   if (event.type === 'EXPENSE') {
     const e = event as Expense
     return (
-      <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+      <button onClick={onOpenDetail}
+        className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3 text-left hover:border-emerald-300 hover:shadow-sm transition-all">
         <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-lg shrink-0">💸</div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -415,48 +444,40 @@ function EventRow({
             })}
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <p className="font-semibold text-zinc-900">{formatAmount(e.amount, e.currency)}</p>
-          {canEdit && (
-            <Link to={editUrl} className="text-zinc-400 hover:text-zinc-700 p-1.5 rounded-lg hover:bg-zinc-100 transition-colors" title="Edit expense">
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
-            </Link>
-          )}
-          {onDelete && (
-            <button onClick={onDelete} className="text-zinc-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors" title="Delete expense">
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-            </button>
-          )}
-        </div>
-      </div>
+        <p className="font-semibold text-zinc-900 shrink-0">{formatAmount(e.amount, e.currency)}</p>
+      </button>
     )
   }
   const s = event as Settlement
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+    <button onClick={onOpenDetail}
+      className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3 text-left hover:border-emerald-300 hover:shadow-sm transition-all">
       <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-lg shrink-0">✅</div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-zinc-900 text-sm">{memberName(s.from, config)} → {memberName(s.to, config)}</p>
         <p className="text-xs text-zinc-400">Settlement · {dateStr}</p>
       </div>
       <p className="font-semibold text-emerald-600 shrink-0">{formatAmount(s.amount, s.currency)}</p>
-    </div>
+    </button>
   )
 }
 
 /** One row in the Activity log — every event type, exactly as committed. */
-function ActivityRow({ event, config, expenseById }: {
+function ActivityRow({ event, config, expenseById, onOpenDetail }: {
   event: Event
   config: GroupConfig | null
   expenseById: Map<string, Expense>
+  onOpenDetail?: () => void
 }) {
   const time = new Date(event.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const Row = onOpenDetail ? 'button' : 'div'
 
   if (event.type === 'EXPENSE') {
     const e = event
     const isEdit = !!e.supersedesId
     return (
-      <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+      <Row onClick={onOpenDetail}
+        className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3 text-left hover:border-emerald-300 hover:shadow-sm transition-all">
         <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0 ${isEdit ? 'bg-amber-50' : 'bg-blue-50'}`}>
           {isEdit ? '✏️' : '➕'}
         </div>
@@ -468,7 +489,7 @@ function ActivityRow({ event, config, expenseById }: {
           <p className="text-xs text-zinc-400">paid by {payerLabel(e, config)} · dated {e.date} · {time}</p>
         </div>
         <p className="font-semibold text-zinc-900 shrink-0">{formatAmount(e.amount, e.currency)}</p>
-      </div>
+      </Row>
     )
   }
 
@@ -506,7 +527,8 @@ function ActivityRow({ event, config, expenseById }: {
   // SETTLEMENT
   const s = event as Settlement
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+    <Row onClick={onOpenDetail}
+      className="w-full bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3 text-left hover:border-emerald-300 hover:shadow-sm transition-all">
       <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-lg shrink-0">💵</div>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-zinc-900">
@@ -515,6 +537,6 @@ function ActivityRow({ event, config, expenseById }: {
         <p className="text-xs text-zinc-400">{time}{s.note ? ` · ${s.note}` : ''}</p>
       </div>
       <p className="font-semibold text-emerald-600 shrink-0">{formatAmount(s.amount, s.currency)}</p>
-    </div>
+    </Row>
   )
 }
