@@ -138,7 +138,7 @@ export function GlobalSettle() {
 
       {/* Settlement modal */}
       {settling && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-safe">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 pb-safe">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h2 className="text-xl font-bold text-zinc-900 mb-1">Record Settlement</h2>
             <p className="text-sm text-zinc-500 mb-5">

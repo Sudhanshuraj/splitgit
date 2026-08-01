@@ -25,7 +25,7 @@ export function TransactionDetailModal({
   const tagById = new Map(tags.map(t => [t.id, t]))
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-safe" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 pb-safe" onClick={onClose}>
       <div className="bg-solid rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <h2 className="text-lg font-bold text-zinc-900">

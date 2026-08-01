@@ -225,7 +225,7 @@ export function Group() {
 
       {/* Invite modal */}
       {showInvite && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-safe">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 pb-safe">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h2 className="text-xl font-bold text-zinc-900 mb-1">Invite to repo</h2>
             <p className="text-xs text-zinc-500 mb-4">Gives a GitHub user access. They then claim their member slot in Settings.</p>
@@ -246,7 +246,7 @@ export function Group() {
 
       {/* Delete confirmation modal */}
       {confirmDeleteId && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 px-4 pb-safe">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 pb-safe">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h2 className="text-xl font-bold text-zinc-900 mb-2">Delete Expense?</h2>
             <p className="text-sm text-zinc-500 mb-1">The expense will be hidden from balances and history.</p>
