@@ -215,9 +215,9 @@ export interface CreateExpenseInput {
   description: string
   amount: number
   currency: string
-  paidBy: number          // ledger member id
+  paidBy: number | Split[] // ledger member id, or multiple {member, amount} contributions
   participants: number[]  // ledger member ids
-  splitType: 'equal' | 'exact' | 'percentage'
+  splitType: 'equal' | 'exact' | 'shares'
   tags: string[]
   date: string  // YYYY-MM-DD
 }
@@ -347,7 +347,10 @@ export async function importEvents(
     if (!m) { m = { id: nextId++, name: name.trim() }; members.push(m); memByName.set(key, m); membersCreated.push(m.name) }
     return m.id
   }
-  for (const e of plan.expenses) { memberId(e.paidBy); e.splits.forEach(s => memberId(s.username)) }
+  for (const e of plan.expenses) {
+    e.paid.forEach(p => memberId(p.username))
+    e.owed.forEach(o => memberId(o.username))
+  }
   for (const s of plan.settlements) { memberId(s.from); memberId(s.to) }
 
   if (tagsCreated.length > 0 || membersCreated.length > 0) {
@@ -361,11 +364,17 @@ export async function importEvents(
     const id = uuidv4()
     const createdAt = `${e.date}T12:00:00.000Z`  // stable, date-preserving
     const tid = e.tag ? tagId(e.tag) : undefined
+    const splits = e.owed.map(o => ({ member: memberId(o.username), amount: o.amount }))
+    const equalShare = e.amount / splits.length
+    const looksEqual = splits.every(s => Math.abs(s.amount - equalShare) < 0.01)
     const base = {
       id, type: 'EXPENSE' as const, description: e.description, amount: e.amount, currency: 'INR',
-      paidBy: memberId(e.paidBy),
-      splits: e.splits.map(s => ({ member: memberId(s.username), amount: s.amount })),
-      splitType: e.splitType, tags: tid ? [tid] : [], date: e.date, createdAt
+      paidBy: e.paid.length === 1
+        ? memberId(e.paid[0]!.username)
+        : e.paid.map(p => ({ member: memberId(p.username), amount: p.amount })),
+      splits,
+      splitType: (looksEqual ? 'equal' : 'exact') as 'equal' | 'exact',
+      tags: tid ? [tid] : [], date: e.date, createdAt
     }
     const hash = await hashExpense(base)
     newEvents.push({ ...base, hash })

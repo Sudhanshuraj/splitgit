@@ -11,7 +11,7 @@ import { readEvents, resolveExpenses, buildDeletion } from '../lib/eventLog'
 import { optimisticAppend } from '../lib/optimistic'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
 import { inviteMember, getGroupConfig, getRepoArchived } from '../lib/github'
-import { memberName, memberInitial, myMemberId } from '../lib/members'
+import { memberName, memberInitial, myMemberId, isPayer, payerLabel } from '../lib/members'
 import { Spinner } from '../components/Spinner'
 import { Analytics } from '../components/Analytics'
 import type { Event, Expense, Settlement, ExpenseDeletion, TagConfig, GroupConfig } from '../types'
@@ -309,9 +309,9 @@ export function Group() {
                       {group.items.map(event => (
                         <EventRow key={event.id} event={event} tags={config?.tags ?? []} config={config ?? null}
                           isEdited={correctedIds.has(event.id)}
-                          canEdit={event.type === 'EXPENSE' && ((myId != null && myId === (event as Expense).paidBy) || isOwner)}
+                          canEdit={event.type === 'EXPENSE' && ((myId != null && isPayer(event as Expense, myId)) || isOwner)}
                           editUrl={`/groups/${owner}/${repo}/edit/${event.id}`}
-                          onDelete={event.type === 'EXPENSE' && ((myId != null && myId === (event as Expense).paidBy) || isOwner) ? () => setConfirmDeleteId(event.id) : undefined}
+                          onDelete={event.type === 'EXPENSE' && ((myId != null && isPayer(event as Expense, myId)) || isOwner) ? () => setConfirmDeleteId(event.id) : undefined}
                         />
                       ))}
                     </div>
@@ -357,7 +357,7 @@ function EventRow({
             {isEdited && <span className="shrink-0 text-xs bg-amber-100 text-amber-700 font-medium px-1.5 py-0.5 rounded-full">edited</span>}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <p className="text-xs text-zinc-400">paid by {memberName(e.paidBy, config)} · {dateStr}</p>
+            <p className="text-xs text-zinc-400">paid by {payerLabel(e, config)} · {dateStr}</p>
             {(e.tags ?? []).map(tagId => {
               const tag = tagById.get(tagId)
               return (

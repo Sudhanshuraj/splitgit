@@ -11,9 +11,14 @@ export interface Expense {
   description: string
   amount: number
   currency: string
-  paidBy: number       // ledger member id
+  // Who fronted the money. Almost always a single ledger member id (the
+  // common case). Can also be a list of {member, amount} contributions when
+  // more than one person paid — those amounts must sum to `amount`.
+  // All historical expenses use the plain-number form; that shape is never
+  // rewritten, just interpreted as a single full-amount contribution.
+  paidBy: number | Split[]
   splits: Split[]      // must sum to amount
-  splitType: 'equal' | 'exact' | 'percentage'
+  splitType: 'equal' | 'exact' | 'shares'
   tags: string[]       // tag IDs (references TagConfig.id)
   date: string         // YYYY-MM-DD — the actual expense date (user-set, defaults to today)
   supersedesId?: string // if set, this is a correction of the original event

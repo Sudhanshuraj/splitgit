@@ -1,22 +1,23 @@
 /**
- * Export the live ledger back into the same CSV shape the importer accepts:
- *   expenses:    date,description,amount,paid_by,split_type,splits,tag
+ * Export the live ledger to CSV, mirroring the import format exactly:
+ *   expenses:    date,description,tag,paid_<Member1>,...,owed_<Member1>,...
  *   settlements: date,from,to,amount,note
+ *
+ * One column pair per group member — a row shows exactly who paid what and
+ * who owed what, with blanks for anyone not involved. `amount` is not a
+ * separate column; it's the sum of the paid_ columns.
  *
  * Uses resolveExpenses() so edited/deleted events are collapsed to their
  * current, correct state — this is a snapshot of what the app shows today,
  * not the raw append-only log.
  */
 import { resolveExpenses } from './eventLog'
-import type { Event, GroupConfig } from '../types'
+import { contributionsOf } from './members'
+import type { Event, GroupConfig, LedgerMember } from '../types'
 
 function csvField(v: string): string {
   if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`
   return v
-}
-
-function nameFor(id: number, config: GroupConfig | null | undefined): string {
-  return config?.members.find(m => m.id === id)?.name ?? `#${id}`
 }
 
 function tagNameFor(id: string, config: GroupConfig | null | undefined): string {
@@ -25,22 +26,26 @@ function tagNameFor(id: string, config: GroupConfig | null | undefined): string 
 
 export function buildExpensesCsv(events: Event[], config: GroupConfig | null | undefined): string {
   const expenses = resolveExpenses(events)
-  const lines = ['date,description,amount,paid_by,split_type,splits,tag']
+  const members: LedgerMember[] = config?.members ?? []
+
+  const header = [
+    'date', 'description', 'tag',
+    ...members.map(m => `paid_${m.name}`),
+    ...members.map(m => `owed_${m.name}`)
+  ]
+  const lines = [header.join(',')]
+
   for (const e of expenses) {
-    const paidBy = nameFor(e.paidBy, config)
     const tag = e.tags[0] ? tagNameFor(e.tags[0], config) : ''
-    const isEqual = e.splitType === 'equal'
-    const splitsStr = isEqual
-      ? e.splits.map(s => nameFor(s.member, config)).join(',')
-      : e.splits.map(s => `${nameFor(s.member, config)}:${s.amount}`).join(',')
+    const paidByMember = new Map(contributionsOf(e).map(c => [c.member, c.amount]))
+    const owedByMember = new Map(e.splits.map(s => [s.member, s.amount]))
+
     const row = [
       e.date,
       csvField(e.description),
-      e.amount.toString(),
-      csvField(paidBy),
-      isEqual ? 'equal' : 'exact',
-      csvField(splitsStr),
-      csvField(tag)
+      csvField(tag),
+      ...members.map(m => { const v = paidByMember.get(m.id); return v ? v.toString() : '' }),
+      ...members.map(m => { const v = owedByMember.get(m.id); return v ? v.toString() : '' })
     ]
     lines.push(row.join(','))
   }
@@ -52,8 +57,8 @@ export function buildSettlementsCsv(events: Event[], config: GroupConfig | null 
   const lines = ['date,from,to,amount,note']
   for (const s of settlements) {
     const date = s.createdAt.slice(0, 10)
-    const from = nameFor(s.from, config)
-    const to = nameFor(s.to, config)
+    const from = config?.members.find(m => m.id === s.from)?.name ?? `#${s.from}`
+    const to = config?.members.find(m => m.id === s.to)?.name ?? `#${s.to}`
     const row = [date, csvField(from), csvField(to), s.amount.toString(), csvField(s.note ?? '')]
     lines.push(row.join(','))
   }

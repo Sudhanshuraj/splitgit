@@ -8,6 +8,7 @@
  */
 
 import type { Event, Expense, Settlement, DebtEdge, LedgerMember } from '../types'
+import { contributionsOf } from './members'
 
 /**
  * Net balance for each ledger member (by id).
@@ -20,7 +21,7 @@ export function computeNetBalances(events: Event[]): Map<number, number> {
   for (const event of events) {
     if (event.type === 'EXPENSE') {
       const e = event as Expense
-      add(e.paidBy, e.amount)
+      for (const contribution of contributionsOf(e)) add(contribution.member, contribution.amount)
       for (const split of e.splits) add(split.member, -split.amount)
     } else if (event.type === 'SETTLEMENT') {
       const s = event as Settlement
@@ -88,7 +89,7 @@ function keysInGroup(g: GroupEvents): Set<string> {
   for (const e of g.events) {
     if (e.type === 'EXPENSE') {
       const ex = e as Expense
-      ks.add(memberKey(g, ex.paidBy))
+      contributionsOf(ex).forEach(c => ks.add(memberKey(g, c.member)))
       ex.splits.forEach(s => ks.add(memberKey(g, s.member)))
     } else if (e.type === 'SETTLEMENT') {
       const s = e as Settlement
@@ -130,7 +131,7 @@ export function computeCrossGroupSettlements(groups: GroupEvents[], currency = '
     for (const e of g.events) {
       if (e.type === 'EXPENSE') {
         const ex = e as Expense
-        label.set(memberKey(g, ex.paidBy), memberName(g, ex.paidBy))
+        contributionsOf(ex).forEach(c => label.set(memberKey(g, c.member), memberName(g, c.member)))
         ex.splits.forEach(s => label.set(memberKey(g, s.member), memberName(g, s.member)))
       } else if (e.type === 'SETTLEMENT') {
         const s = e as Settlement

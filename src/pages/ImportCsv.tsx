@@ -38,12 +38,16 @@ export function ImportCsv() {
     enabled: !!octokit && !!owner && !!repo
   })
   const existingTagNames = new Set((configData?.config.tags ?? []).map(t => t.name.toLowerCase()))
+  const existingMemberNames = (configData?.config.members ?? []).map(m => m.name)
 
   async function onExpenseFile(f: File) {
     const text = await f.text()
     const { rows, errors } = parseImportCsv(text)
     setExpRows(rows); setExpErrors(errors); setExpName(f.name)
   }
+  // Sample header shown to the user so they know what columns to prepare.
+  const sampleHeaderMembers = existingMemberNames.length > 0 ? existingMemberNames : ['Alice', 'Bob']
+  const sampleHeader = ['date', 'description', 'tag', ...sampleHeaderMembers.map(n => `paid_${n}`), ...sampleHeaderMembers.map(n => `owed_${n}`)].join(',')
   async function onSettlementFile(f: File) {
     const text = await f.text()
     const { rows, errors } = parseSettlementsCsv(text)
@@ -53,7 +57,10 @@ export function ImportCsv() {
   const stats = useMemo(() => {
     const total = expRows.reduce((s, r) => s + r.amount, 0)
     const people = new Set<string>()
-    expRows.forEach(r => { people.add(r.paidBy); r.splits.forEach(s => people.add(s.username)) })
+    expRows.forEach(r => {
+      r.paid.forEach(p => people.add(p.username))
+      r.owed.forEach(o => people.add(o.username))
+    })
     setRows.forEach(r => { people.add(r.from); people.add(r.to) })
     const newTags = new Set(
       expRows.map(r => r.tag).filter(t => t && !existingTagNames.has(t.toLowerCase()))
@@ -107,6 +114,8 @@ export function ImportCsv() {
               onChange={e => e.target.files?.[0] && onExpenseFile(e.target.files[0])}
               className="block w-full text-sm text-zinc-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-emerald-600 file:text-white file:font-semibold file:text-sm hover:file:bg-emerald-700" />
             {expName && <p className="text-xs text-zinc-500 mt-1">{expName} — {expRows.length} rows</p>}
+            <p className="text-xs text-zinc-400 mt-2">Expected header:</p>
+            <code className="block text-[11px] text-zinc-500 bg-white border border-zinc-200 rounded-lg px-2 py-1.5 mt-1 overflow-x-auto whitespace-nowrap">{sampleHeader}</code>
           </div>
           <div>
             <label className="block text-sm font-medium text-zinc-700 mb-1.5">Settlements CSV <span className="text-zinc-400 text-xs">optional</span></label>
@@ -181,8 +190,8 @@ export function ImportCsv() {
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-zinc-400 mt-0.5 flex-wrap">
                     <span>{r.date}</span><span>·</span>
-                    <span>paid by @{r.paidBy}</span><span>·</span>
-                    <span>{r.splitType}</span>
+                    <span>paid by {r.paid.map(p => `${p.username} (${formatAmount(p.amount, 'INR')})`).join(', ')}</span><span>·</span>
+                    <span>owed by {r.owed.map(o => `${o.username} (${formatAmount(o.amount, 'INR')})`).join(', ')}</span>
                     {r.tag && <span className="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">{r.tag}</span>}
                   </div>
                   {r.warnings.length > 0 && (

@@ -23,7 +23,7 @@ export async function hashExpense(e: HashableExpense): Promise<string> {
     description: e.description,
     amount: e.amount,
     currency: e.currency,
-    paidBy: e.paidBy,
+    paidBy: typeof e.paidBy === 'number' ? e.paidBy : e.paidBy.slice().sort((a, b) => a.member - b.member),
     splits: e.splits.slice().sort((a, b) => a.member - b.member),
     splitType: e.splitType,
     tags: e.tags.slice().sort(),

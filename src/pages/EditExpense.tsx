@@ -5,7 +5,7 @@
  * to the original. Both commits are visible in git history.
  * The UI shows only the latest version.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
@@ -13,7 +13,9 @@ import { readEvents, buildExpense, findLatestExpense } from '../lib/eventLog'
 import { optimisticAppend } from '../lib/optimistic'
 import { getGroupConfig } from '../lib/github'
 import { formatAmount } from '../lib/balances'
-import { memberName, memberInitial, myMemberId } from '../lib/members'
+import { memberName, memberInitial, myMemberId, isPayer } from '../lib/members'
+import { SplitEditor, computeSplits, splitsAreValid } from '../components/SplitEditor'
+import type { SplitState } from '../components/SplitEditor'
 import { Spinner } from '../components/Spinner'
 import { DatePicker } from '../components/DatePicker'
 import type { Expense } from '../types'
@@ -39,7 +41,9 @@ export function EditExpense() {
   const [amount, setAmount] = useState('')
   const currency = CURRENCY
   const [paidBy, setPaidBy] = useState<number | null>(null)
-  const [participants, setParticipants] = useState<Set<number>>(new Set())
+  const [multiPayer, setMultiPayer] = useState(false)
+  const [payerAmounts, setPayerAmounts] = useState<Record<number, string>>({})
+  const [split, setSplit] = useState<SplitState | null>(null)
   const [selectedTag, setSelectedTag] = useState<string>('')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [loaded, setLoaded] = useState(false)
@@ -73,8 +77,27 @@ export function EditExpense() {
     if (!original || loaded) return
     setDescription(original.description)
     setAmount(original.amount.toString())
-    setPaidBy(original.paidBy)
-    setParticipants(new Set(original.splits.map(s => s.member)))
+    if (typeof original.paidBy === 'number') {
+      setPaidBy(original.paidBy)
+    } else {
+      setMultiPayer(true)
+      const amounts: Record<number, string> = {}
+      for (const c of original.paidBy) amounts[c.member] = c.amount.toString()
+      setPayerAmounts(amounts)
+    }
+    // Pre-fill the split editor from whatever this expense currently has.
+    // Equal-looking splits load into the "Equal" tab; anything else loads
+    // into "Unequal" with the exact amounts already typed in — the ratios
+    // used for a "by shares" split aren't stored (only the resulting
+    // amounts are), so re-editing a shares split shows it as unequal amounts,
+    // which is an equivalent, still-correct starting point.
+    if (original.splitType === 'equal' && isEqualSplit(original)) {
+      setSplit({ mode: 'equal', participants: new Set(original.splits.map(s => s.member)), exactAmounts: {}, shareValues: {} })
+    } else {
+      const exact: Record<number, string> = {}
+      for (const s of original.splits) exact[s.member] = s.amount.toString()
+      setSplit({ mode: 'exact', participants: new Set(), exactAmounts: exact, shareValues: {} })
+    }
     setSelectedTag(original.tags?.[0] ?? '')
     setDate(original.date ?? original.createdAt.slice(0, 10))
     setLoaded(true)
@@ -82,53 +105,47 @@ export function EditExpense() {
 
   const tags = config?.tags ?? []
 
-  // Preserve the original split (which may be unequal/exact) unless the user
-  // actually changed the amount or who's involved — editing must never silently
-  // re-split a transaction and shift the balance.
-  const splitUnchanged = original != null &&
-    parseFloat(amount) === original.amount &&
-    participants.size === original.splits.length &&
-    original.splits.every(s => participants.has(s.member))
+  const parsedAmount = parseFloat(amount)
+  const effectiveSplit: SplitState = split ?? { mode: 'equal', participants: new Set(), exactAmounts: {}, shareValues: {} }
+  const computedSplits = useMemo(() => computeSplits(effectiveSplit, parsedAmount), [effectiveSplit, parsedAmount])
+
+  // Multi-payer contributions: only entries with a positive parsed amount count.
+  const payerSplits = Object.entries(payerAmounts)
+    .map(([id, v]) => ({ member: parseInt(id, 10), amount: parseFloat(v) }))
+    .filter(p => !isNaN(p.amount) && p.amount > 0)
+  const payerSum = parseFloat(payerSplits.reduce((s, p) => s + p.amount, 0).toFixed(2))
+  const payerSumMatches = !isNaN(parsedAmount) && Math.abs(payerSum - parsedAmount) < 0.01
+
+  function setPayerAmount(id: number, v: string) {
+    setPayerAmounts(prev => ({ ...prev, [id]: v }))
+  }
 
   async function save() {
     if (!isValid) return
     const event = await buildExpense({
       description: description.trim(),
-      amount: parseFloat(amount),
+      amount: parsedAmount,
       currency,
-      paidBy: paidBy!,
-      participants: Array.from(participants),
-      splitType: splitUnchanged ? (original!.splitType) : 'equal',
+      paidBy: multiPayer ? payerSplits : paidBy!,
+      participants: computedSplits.map(s => s.member),
+      splitType: effectiveSplit.mode === 'shares' ? 'shares' : effectiveSplit.mode === 'exact' ? 'exact' : 'equal',
       tags: selectedTag ? [selectedTag] : [],
       date
-    }, original!.id, splitUnchanged ? original!.splits : undefined)
+    }, original!.id, computedSplits)
     optimisticAppend(qc, octokit!, owner!, repo!, event, description.trim() || 'expense')
     navigate(`/groups/${owner}/${repo}`)
   }
 
-  const parsedAmount = parseFloat(amount)
-  const perPerson = participants.size > 0 && !isNaN(parsedAmount)
-    ? parsedAmount / participants.size : 0
-
   const isValid =
     description.trim().length > 0 &&
     !isNaN(parsedAmount) && parsedAmount > 0 &&
-    paidBy != null && participants.size > 0 &&
+    (multiPayer ? (payerSplits.length >= 1 && payerSumMatches) : paidBy != null) &&
+    splitsAreValid(effectiveSplit, parsedAmount) &&
     (tags.length === 0 || selectedTag !== '')
 
-  // Only the person who owns the payer slot, or the group owner, can edit
+  // Only someone who was a payer on this expense, or the group owner, can edit
   const myId = myMemberId(config, user?.login)
-  const canEdit = (myId != null && myId === original?.paidBy) || user?.login === owner
-
-  function toggleParticipant(id: number) {
-    setParticipants(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
+  const canEdit = (myId != null && original != null && isPayer(original, myId)) || user?.login === owner
 
   if (eventsLoading || configLoading) {
     return <Spinner className="py-16" />
@@ -193,11 +210,6 @@ export function EditExpense() {
           <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
             min="0.01" step="0.01"
             className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-base" />
-          {original && !splitUnchanged && !isEqualSplit(original) && (
-            <p className="text-xs text-amber-600 mt-1">
-              ⚠ This expense has an unequal split. Changing the amount or who's involved will re-split it equally.
-            </p>
-          )}
         </div>
 
         {/* Tag — single required selection */}
@@ -226,49 +238,59 @@ export function EditExpense() {
         )}
 
         <div>
-          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Paid by</label>
-          <div className="flex flex-wrap gap-2">
-            {members.map(m => (
-              <button key={m.id} onClick={() => setPaidBy(m.id)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors
-                  ${paidBy === m.id ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
-                <span className="w-5 h-5 rounded-full bg-zinc-200 text-zinc-600 text-[10px] font-bold flex items-center justify-center">{memberInitial(m.id, config)}</span>
-                {m.name}
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-sm font-medium text-zinc-700">Paid by</label>
+            {members.length > 1 && (
+              <button type="button" onClick={() => setMultiPayer(v => !v)}
+                className="text-xs font-medium text-emerald-600 hover:text-emerald-700">
+                {multiPayer ? 'Single payer' : '+ Split between multiple people'}
               </button>
-            ))}
+            )}
           </div>
+          {!multiPayer ? (
+            <div className="flex flex-wrap gap-2">
+              {members.map(m => (
+                <button key={m.id} onClick={() => setPaidBy(m.id)}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors
+                    ${paidBy === m.id ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
+                  <span className="w-5 h-5 rounded-full bg-zinc-200 text-zinc-600 text-[10px] font-bold flex items-center justify-center">{memberInitial(m.id, config)}</span>
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {members.map(m => (
+                <div key={m.id} className="flex items-center gap-3 bg-white border border-zinc-200 rounded-xl px-3 py-2">
+                  <span className="w-6 h-6 rounded-full bg-zinc-200 text-zinc-600 text-[10px] font-bold flex items-center justify-center shrink-0">{memberInitial(m.id, config)}</span>
+                  <span className="flex-1 text-sm text-zinc-800">{m.name}</span>
+                  <input type="number" min="0" step="0.01" placeholder="0.00"
+                    value={payerAmounts[m.id] ?? ''}
+                    onChange={e => setPayerAmount(m.id, e.target.value)}
+                    className="w-28 border border-zinc-300 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+              ))}
+              <p className={`text-xs ${payerSumMatches ? 'text-zinc-400' : 'text-amber-600'}`}>
+                {formatAmount(payerSum, currency)} of {isNaN(parsedAmount) ? '—' : formatAmount(parsedAmount, currency)} assigned
+                {!payerSumMatches && ' — must add up to the total amount'}
+              </p>
+            </div>
+          )}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-zinc-700 mb-1.5">
-            Split between <span className="text-zinc-400 font-normal text-xs">(equal split)</span>
-          </label>
-          <div className="space-y-2">
-            {members.map(m => {
-              const on = participants.has(m.id)
-              return (
-                <button key={m.id} onClick={() => toggleParticipant(m.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-sm transition-colors
-                    ${on ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-zinc-200 hover:border-zinc-300'}`}>
-                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors
-                    ${on ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-300'}`}>
-                    {on && <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 6l3 3 5-5" /></svg>}
-                  </div>
-                  <span className="w-7 h-7 rounded-full bg-zinc-200 text-zinc-600 text-xs font-bold flex items-center justify-center">{memberInitial(m.id, config)}</span>
-                  <span className="font-medium text-zinc-800">{m.name}</span>
-                  {on && perPerson > 0 && <span className="ml-auto text-emerald-600 font-semibold">{formatAmount(perPerson, currency)}</span>}
-                </button>
-              )
-            })}
-          </div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1.5">Split between</label>
+          <SplitEditor members={members} config={config} amount={parsedAmount} currency={currency}
+            state={effectiveSplit} onChange={setSplit} />
         </div>
 
         {isValid && (
           <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-4 text-sm text-zinc-600">
-            <span className="font-medium text-zinc-900">{memberName(paidBy!, config)}</span> paid{' '}
+            <span className="font-medium text-zinc-900">
+              {multiPayer ? payerSplits.map(p => memberName(p.member, config)).join(' + ') : memberName(paidBy!, config)}
+            </span> paid{' '}
             <span className="font-medium text-zinc-900">{formatAmount(parsedAmount, currency)}</span>
-            {' '}for {participants.size} people. Each owes{' '}
-            <span className="font-medium text-emerald-600">{formatAmount(perPerson, currency)}</span>.
+            {' '}for {computedSplits.length} people.
           </div>
         )}
 

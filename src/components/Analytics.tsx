@@ -11,7 +11,7 @@
 import { useState, useMemo } from 'react'
 import type { Event, Expense, TagConfig, GroupConfig } from '../types'
 import { formatAmount } from '../lib/balances'
-import { memberName } from '../lib/members'
+import { memberName, contributionsOf, payerLabel } from '../lib/members'
 import { resolveExpenses } from '../lib/eventLog'
 
 // ─── Time range ───────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ export function Analytics({ events, tags, currency, config }: AnalyticsProps) {
   const perPerson = useMemo(() => {
     const paid = new Map<number, number>(), share = new Map<number, number>()
     for (const e of expenses) {
-      paid.set(e.paidBy, (paid.get(e.paidBy) ?? 0) + e.amount)
+      for (const c of contributionsOf(e)) paid.set(c.member, (paid.get(c.member) ?? 0) + c.amount)
       for (const s of e.splits) share.set(s.member, (share.get(s.member) ?? 0) + s.amount)
     }
     const people = new Set<number>([...paid.keys(), ...share.keys()])
@@ -373,7 +373,7 @@ export function Analytics({ events, tags, currency, config }: AnalyticsProps) {
                       <p className="text-sm font-medium text-zinc-800 truncate">{e.description}</p>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-xs text-zinc-400">{fmtShort(txDate(e))}</span>
-                        <span className="text-xs text-zinc-400">· paid by {memberName(e.paidBy, config)}</span>
+                        <span className="text-xs text-zinc-400">· paid by {payerLabel(e, config)}</span>
                         {tag && (
                           <span className="text-xs px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 font-medium">
                             {tag.emoji && <span className="mr-0.5">{tag.emoji}</span>}{tag.name}
