@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { v4 as uuidv4 } from 'uuid'
 import { useAuthStore } from '../store/auth'
 import { getGroupConfig, saveGroupConfig, archiveGroup, deleteGroup } from '../lib/github'
-import { readEvents } from '../lib/eventLog'
+import { readEvents, logConfigChange } from '../lib/eventLog'
 import { invalidateCachedConfig, invalidateCachedEvents } from '../lib/cache'
 import { myMemberId, memberInitial, nextMemberId } from '../lib/members'
 import { buildExpensesCsv, buildSettlementsCsv, downloadCsv } from '../lib/exportCsv'
@@ -84,50 +84,79 @@ export function GroupSettings() {
     return saveGroupConfig(octokit!, owner!, repo!, merged, configData?.sha ?? null)
   }
 
+  // Every tag/member mutation also logs a plain-English entry into the same
+  // append-only event log expenses use, so the Activity tab can show "you
+  // renamed X to Y" in the exact order it happened. config.json itself has
+  // no history — this is the only record of *when* and *what* changed.
+  function logChange(summary: string) {
+    if (!user || !octokit || !owner || !repo) return
+    logConfigChange(octokit, owner, repo, summary, user.login).catch(() => { /* best-effort; not worth blocking the UI on */ })
+  }
+
   const saveMutation = useMutation({
-    mutationFn: (tags: TagConfig[]) => persistConfig({ tags }),
-    onSuccess: async () => { await invalidateCachedConfig(owner!, repo!); qc.invalidateQueries({ queryKey: ['config', owner, repo] }) }
+    mutationFn: (vars: { tags: TagConfig[]; summary: string }) => persistConfig({ tags: vars.tags }),
+    onSuccess: async (_data, vars) => {
+      await invalidateCachedConfig(owner!, repo!)
+      qc.invalidateQueries({ queryKey: ['config', owner, repo] })
+      logChange(vars.summary)
+    }
   })
 
   const memberMutation = useMutation({
-    mutationFn: (members: LedgerMember[]) => persistConfig({ members }),
-    onSuccess: async () => { await invalidateCachedConfig(owner!, repo!); qc.invalidateQueries({ queryKey: ['config', owner, repo] }) }
+    mutationFn: (vars: { members: LedgerMember[]; summary: string }) => persistConfig({ members: vars.members }),
+    onSuccess: async (_data, vars) => {
+      await invalidateCachedConfig(owner!, repo!)
+      qc.invalidateQueries({ queryKey: ['config', owner, repo] })
+      logChange(vars.summary)
+    }
   })
 
   function addMember() {
     const name = newMemberName.trim()
     if (!name) return
-    memberMutation.mutate([...ledger, { id: nextMemberId(config), name }])
+    memberMutation.mutate({ members: [...ledger, { id: nextMemberId(config), name }], summary: `Added member "${name}"` })
     setNewMemberName('')
   }
   function renameMember(id: number, name: string) {
-    if (!name.trim()) return
-    memberMutation.mutate(ledger.map(m => m.id === id ? { ...m, name: name.trim() } : m))
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const oldName = ledger.find(m => m.id === id)?.name ?? `#${id}`
+    memberMutation.mutate({
+      members: ledger.map(m => m.id === id ? { ...m, name: trimmed } : m),
+      summary: `Renamed member "${oldName}" to "${trimmed}"`
+    })
   }
   function claimSlot() {
     if (!user) return
     let members = ledger
     let targetId: number
+    let targetName: string
     if (claimChoice === '__new__') {
       const name = newClaimName.trim()
       if (!name) return
       targetId = nextMemberId(config)
+      targetName = name
       members = [...members, { id: targetId, name }]
     } else {
       targetId = parseInt(claimChoice, 10)
       if (isNaN(targetId)) return
+      targetName = ledger.find(m => m.id === targetId)?.name ?? `#${targetId}`
     }
     // release any slot I previously held, then claim the target
     members = members.map(m => {
       if (m.claimedBy === user.login) return { ...m, claimedBy: undefined }
       return m
     }).map(m => m.id === targetId ? { ...m, claimedBy: user.login } : m)
-    memberMutation.mutate(members)
+    memberMutation.mutate({ members, summary: `@${user.login} claimed member "${targetName}"` })
     setClaimChoice(''); setNewClaimName('')
   }
   function unclaim() {
     if (!user) return
-    memberMutation.mutate(ledger.map(m => m.claimedBy === user.login ? { ...m, claimedBy: undefined } : m))
+    const name = ledger.find(m => m.claimedBy === user.login)?.name
+    memberMutation.mutate({
+      members: ledger.map(m => m.claimedBy === user.login ? { ...m, claimedBy: undefined } : m),
+      summary: `@${user.login} unclaimed member "${name ?? '?'}"`
+    })
   }
 
   const archiveMutation = useMutation({
@@ -153,18 +182,20 @@ export function GroupSettings() {
   const isOwner = owner === user?.login
 
   function addTag() {
-    if (!newTagName.trim()) return
+    const name = newTagName.trim()
+    if (!name) return
     const updated: TagConfig[] = [
       ...tags,
-      { id: uuidv4(), name: newTagName.trim(), emoji: newTagEmoji || undefined }
+      { id: uuidv4(), name, emoji: newTagEmoji || undefined }
     ]
-    saveMutation.mutate(updated)
+    saveMutation.mutate({ tags: updated, summary: `Added tag "${name}"` })
     setNewTagName('')
     setNewTagEmoji('')
   }
 
   function removeTag(id: string) {
-    saveMutation.mutate(tags.filter(t => t.id !== id))
+    const name = tags.find(t => t.id === id)?.name ?? '?'
+    saveMutation.mutate({ tags: tags.filter(t => t.id !== id), summary: `Removed tag "${name}"` })
   }
 
   function startEditing(tag: TagConfig) {
@@ -174,11 +205,14 @@ export function GroupSettings() {
   }
 
   function saveEdit(id: string) {
-    if (!editName.trim()) return
+    const newName = editName.trim()
+    if (!newName) return
+    const oldName = tags.find(t => t.id === id)?.name ?? '?'
     const updated = tags.map(t =>
-      t.id === id ? { ...t, name: editName.trim(), emoji: editEmoji || undefined } : t
+      t.id === id ? { ...t, name: newName, emoji: editEmoji || undefined } : t
     )
-    saveMutation.mutate(updated)
+    const summary = oldName !== newName ? `Renamed tag "${oldName}" to "${newName}"` : `Updated tag "${newName}"`
+    saveMutation.mutate({ tags: updated, summary })
     setEditingId(null)
   }
 

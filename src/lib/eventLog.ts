@@ -5,9 +5,9 @@
  */
 
 import { Octokit } from 'octokit'
-import type { Event, Expense, Settlement, ExpenseDeletion, TagConfig, LedgerMember, Split } from '../types'
+import type { Event, Expense, Settlement, ExpenseDeletion, ConfigChange, TagConfig, LedgerMember, Split } from '../types'
 import { getExpensesFile, updateExpensesFile, getGroupConfig, saveGroupConfig } from './github'
-import { hashExpense, hashSettlement, hashDeletion } from './hash'
+import { hashExpense, hashSettlement, hashDeletion, hashConfigChange } from './hash'
 import { getCachedEvents, setCachedEvents, invalidateCachedEvents, invalidateCachedConfig } from './cache'
 import type { ImportExpenseRow, ImportSettlementRow } from './importCsv'
 
@@ -187,6 +187,27 @@ export async function buildDeletion(expenseId: string, deletedBy: string): Promi
   const base = { id, type: 'EXPENSE_DELETION' as const, deletedId: expenseId, deletedBy, createdAt }
   const hash = await hashDeletion(base)
   return { ...base, hash }
+}
+
+/**
+ * Log a config change (tag/member add, rename, remove, claim/unclaim) into
+ * the same append-only event log as expenses. config.json itself is just
+ * overwritten each time and keeps no history, so this is what lets the
+ * Activity tab show "you renamed Household to Rent" etc. in the order it
+ * actually happened, alongside every expense add/edit/delete.
+ */
+export async function buildConfigChange(summary: string, actor: string): Promise<ConfigChange> {
+  const id = uuidv4()
+  const createdAt = new Date().toISOString()
+  const base = { id, type: 'CONFIG_CHANGE' as const, summary, actor, createdAt }
+  const hash = await hashConfigChange(base)
+  return { ...base, hash }
+}
+
+/** Build + commit a config-change log entry in one call (fire-and-forget from the UI). */
+export async function logConfigChange(octokit: Octokit, owner: string, repo: string, summary: string, actor: string): Promise<void> {
+  const event = await buildConfigChange(summary, actor)
+  await appendOne(octokit, owner, repo, event)
 }
 
 // ─── Edit event (append-only: adds an EDIT correction record) ─────────────────

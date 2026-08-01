@@ -174,6 +174,18 @@ html.dark .bg-white {
 /* keep tiny inline white bits (avatars, checkmarks) crisp */
 .bg-white.w-1\.5, .bg-white.w-3, .bg-white.rounded-full.w-1\.5 { backdrop-filter: none; box-shadow: none; }
 
+/* Fully opaque surfaces — for popovers/menus stacked over other content
+   (e.g. the date picker), where the frosted-glass see-through look makes
+   the underlying text hard to read. */
+.bg-solid {
+  background-color: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html.dark .bg-solid {
+  background-color: #18181b;
+}
+
 /* Gradient primary buttons with a soft glow */
 .bg-emerald-600 {
   background-image: linear-gradient(135deg, #10b981 0%, #059669 100%);

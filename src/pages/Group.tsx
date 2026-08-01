@@ -14,7 +14,7 @@ import { inviteMember, getGroupConfig, getRepoArchived } from '../lib/github'
 import { memberName, memberInitial, myMemberId, isPayer, payerLabel } from '../lib/members'
 import { Spinner } from '../components/Spinner'
 import { Analytics } from '../components/Analytics'
-import type { Event, Expense, Settlement, ExpenseDeletion, TagConfig, GroupConfig } from '../types'
+import type { Event, Expense, Settlement, ExpenseDeletion, ConfigChange, TagConfig, GroupConfig } from '../types'
 
 type HistRange = 'all' | 'this-month' | 'last-month' | 'this-year'
 
@@ -44,7 +44,7 @@ export function Group() {
   const qc = useQueryClient()
   const [showInvite, setShowInvite] = useState(false)
   const [inviteUsername, setInviteUsername] = useState('')
-  const [activeTab, setActiveTab] = useState<'balances' | 'history' | 'analytics'>('balances')
+  const [activeTab, setActiveTab] = useState<'balances' | 'history' | 'activity' | 'analytics'>('balances')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [histRange, setHistRange] = useState<HistRange>('all')
   const [histTag, setHistTag] = useState<string>('all')
@@ -133,6 +133,31 @@ export function Group() {
     }
     return [...groupsMap.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([, v]) => v)
   }, [events, histRange, histTag, supersededIds, deletedExpenseIds])
+
+  // Activity: every event (adds, edits, deletions, settlements, config
+  // changes) in the exact order it was actually committed — unlike History,
+  // nothing is resolved away or re-sorted by expense date. This is the "what
+  // did I actually do, in order" view — useful when you're back-filling
+  // expenses from a previous week and want to confirm what's already in.
+  const expenseById = useMemo(() => {
+    const m = new Map<string, Expense>()
+    for (const e of events) if (e.type === 'EXPENSE') m.set(e.id, e as Expense)
+    return m
+  }, [events])
+
+  const activityGroups = useMemo(() => {
+    const sorted = [...events].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    const groupsMap = new Map<string, { label: string; items: Event[] }>()
+    for (const e of sorted) {
+      const d = new Date(e.createdAt)
+      const key = d.toISOString().slice(0, 10)
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, { label: d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }), items: [] })
+      }
+      groupsMap.get(key)!.items.push(e)
+    }
+    return [...groupsMap.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([, v]) => v)
+  }, [events])
 
   if (!owner || !repo) { navigate('/groups'); return null }
 
@@ -231,7 +256,7 @@ export function Group() {
 
       {/* Tabs */}
       <div className="flex bg-zinc-100 rounded-xl p-1 mb-4">
-        {(['balances', 'history', 'analytics'] as const).map(tab => (
+        {(['balances', 'history', 'activity', 'analytics'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`flex-1 py-2 text-sm font-medium rounded-lg capitalize transition-colors ${activeTab === tab ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}>
             {tab}
@@ -323,6 +348,28 @@ export function Group() {
         </div>
       )}
 
+      {/* Activity — the raw, true-order log of everything done in this group */}
+      {!eventsLoading && activeTab === 'activity' && (
+        <div>
+          {activityGroups.length === 0 ? (
+            <div className="text-center py-12 text-zinc-500"><p className="text-sm">Nothing logged yet.</p></div>
+          ) : (
+            <div className="space-y-5">
+              {activityGroups.map(group => (
+                <div key={group.label}>
+                  <h3 className="text-sm font-bold text-zinc-700 mb-2 px-1">{group.label}</h3>
+                  <div className="space-y-2">
+                    {group.items.map(event => (
+                      <ActivityRow key={event.id} event={event} config={config ?? null} expenseById={expenseById} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Analytics */}
       {!eventsLoading && activeTab === 'analytics' && (
         <Analytics events={effectiveEvents} tags={config?.tags ?? []} currency={defaultCurrency} config={config ?? null} />
@@ -391,6 +438,81 @@ function EventRow({
       <div className="flex-1 min-w-0">
         <p className="font-medium text-zinc-900 text-sm">{memberName(s.from, config)} → {memberName(s.to, config)}</p>
         <p className="text-xs text-zinc-400">Settlement · {dateStr}</p>
+      </div>
+      <p className="font-semibold text-emerald-600 shrink-0">{formatAmount(s.amount, s.currency)}</p>
+    </div>
+  )
+}
+
+/** One row in the Activity log — every event type, exactly as committed. */
+function ActivityRow({ event, config, expenseById }: {
+  event: Event
+  config: GroupConfig | null
+  expenseById: Map<string, Expense>
+}) {
+  const time = new Date(event.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+
+  if (event.type === 'EXPENSE') {
+    const e = event
+    const isEdit = !!e.supersedesId
+    return (
+      <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0 ${isEdit ? 'bg-amber-50' : 'bg-blue-50'}`}>
+          {isEdit ? '✏️' : '➕'}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-zinc-900">
+            <span className="font-medium">{isEdit ? 'Edited' : 'Added'} expense:</span>{' '}
+            <span className="truncate">{e.description}</span>
+          </p>
+          <p className="text-xs text-zinc-400">paid by {payerLabel(e, config)} · dated {e.date} · {time}</p>
+        </div>
+        <p className="font-semibold text-zinc-900 shrink-0">{formatAmount(e.amount, e.currency)}</p>
+      </div>
+    )
+  }
+
+  if (event.type === 'EXPENSE_DELETION') {
+    const d = event as ExpenseDeletion
+    const original = expenseById.get(d.deletedId)
+    return (
+      <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center text-lg shrink-0">🗑️</div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-zinc-900">
+            <span className="font-medium">Deleted expense:</span>{' '}
+            {original ? original.description : '(unknown)'}
+          </p>
+          <p className="text-xs text-zinc-400">by @{d.deletedBy} · {time}</p>
+        </div>
+        {original && <p className="font-semibold text-zinc-400 line-through shrink-0">{formatAmount(original.amount, original.currency)}</p>}
+      </div>
+    )
+  }
+
+  if (event.type === 'CONFIG_CHANGE') {
+    const c = event as ConfigChange
+    return (
+      <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-zinc-100 flex items-center justify-center text-lg shrink-0">🏷️</div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-zinc-900">{c.summary}</p>
+          <p className="text-xs text-zinc-400">by @{c.actor} · {time}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // SETTLEMENT
+  const s = event as Settlement
+  return (
+    <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex items-center gap-3">
+      <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-lg shrink-0">💵</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-zinc-900">
+          <span className="font-medium">Settlement:</span> {memberName(s.from, config)} → {memberName(s.to, config)}
+        </p>
+        <p className="text-xs text-zinc-400">{time}{s.note ? ` · ${s.note}` : ''}</p>
       </div>
       <p className="font-semibold text-emerald-600 shrink-0">{formatAmount(s.amount, s.currency)}</p>
     </div>

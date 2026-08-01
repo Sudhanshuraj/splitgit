@@ -47,7 +47,23 @@ export interface ExpenseDeletion {
   hash: string
 }
 
-export type Event = Expense | Settlement | ExpenseDeletion
+/**
+ * A logged config change (tag/member add, rename, remove, claim/unclaim).
+ * config.json itself has no history — it's just overwritten each time — so
+ * these events are how the Activity tab can show "you renamed X to Y" etc.
+ * `summary` is a plain-English, already-formatted description; there's no
+ * need to reconstruct it from structured before/after fields.
+ */
+export interface ConfigChange {
+  id: string
+  type: 'CONFIG_CHANGE'
+  summary: string
+  actor: string        // GitHub login of who made the change
+  createdAt: string
+  hash: string
+}
+
+export type Event = Expense | Settlement | ExpenseDeletion | ConfigChange
 
 // ─── GitHub-backed group ──────────────────────────────────────────────────────
 

@@ -92,7 +92,7 @@ export function DatePicker({ value, onChange }: Props) {
 
       {/* Calendar popup */}
       {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 bg-white border border-zinc-200 rounded-2xl shadow-xl p-3 w-72">
+        <div className="absolute z-50 top-full left-0 mt-1 bg-solid border border-zinc-200 rounded-2xl shadow-xl p-3 w-72">
           {/* Month nav */}
           <div className="flex items-center justify-between mb-3 px-1">
             <button type="button" onClick={prevMonth}
