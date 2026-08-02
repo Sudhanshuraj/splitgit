@@ -139,6 +139,15 @@ export function Group() {
       }
       groupsMap.get(key)!.items.push(e)
     }
+    // Sort strictly by transaction date within each month — never by when it
+    // was added. Same-day items fall back to createdAt only to keep the
+    // order stable (deterministic), not to imply add-order matters.
+    for (const g of groupsMap.values()) {
+      g.items.sort((a, b) => {
+        const byDate = +eventDate(b) - +eventDate(a)
+        return byDate !== 0 ? byDate : b.createdAt.localeCompare(a.createdAt)
+      })
+    }
     return [...groupsMap.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([, v]) => v)
   }, [events, histRange, histTag, histSearch, supersededIds, deletedExpenseIds])
 
