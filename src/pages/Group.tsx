@@ -289,6 +289,12 @@ export function Group() {
       {/* Balances */}
       {!eventsLoading && activeTab === 'balances' && (
         <div className="space-y-3">
+          {!isArchived && ledger.length > 1 && (
+            <Link to={`/groups/${owner}/${repo}/settle`}
+              className="block text-center text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl py-2.5 transition-colors">
+              Record a settlement or loan (any two members)
+            </Link>
+          )}
           {events.length === 0 ? (
             <div className="text-center py-12 text-zinc-500"><p className="text-4xl mb-3">💸</p><p className="font-medium text-zinc-700">No expenses yet</p><p className="text-sm mt-1">Add the first one to get started.</p></div>
           ) : settlements.length === 0 ? (

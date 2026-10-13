@@ -78,10 +78,11 @@ export function Settle() {
     }
   }, [loaded, isEdit, original, config, myId, prefill])
 
-  // Picking the person already on the other side swaps the two, so with only
-  // two members you can still flip direction (e.g. Amit→you becomes you→Amit).
-  function pickFrom(id: number) { if (id === to) setTo(from); setFrom(id) }
-  function pickTo(id: number) { if (id === from) setFrom(to); setTo(id) }
+  // Any member can be on either side — the only rule is they can't be the
+  // same person. (Picking the same person on both sides just shows a warning.)
+  const pickFrom = (id: number) => setFrom(id)
+  const pickTo = (id: number) => setTo(id)
+  const sameMember = from != null && from === to
 
   const parsedAmount = parseFloat(amount)
   const isValid = from != null && to != null && from !== to && !isNaN(parsedAmount) && parsedAmount > 0
@@ -161,6 +162,11 @@ export function Settle() {
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">{kind === 'loan' ? 'Lent to' : 'Paid to'}</label>
           <MemberPicker value={to} onPick={pickTo} />
+          {sameMember && <p className="text-xs text-amber-600 mt-1">Payer and receiver can't be the same person.</p>}
+          {from != null && to != null && !sameMember && (
+            <button type="button" onClick={() => { setFrom(to); setTo(from) }}
+              className="text-xs font-medium text-emerald-600 hover:text-emerald-700 mt-2">⇄ Swap direction</button>
+          )}
         </div>
 
         <div>
