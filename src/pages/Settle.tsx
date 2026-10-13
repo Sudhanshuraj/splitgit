@@ -78,6 +78,11 @@ export function Settle() {
     }
   }, [loaded, isEdit, original, config, myId, prefill])
 
+  // Picking the person already on the other side swaps the two, so with only
+  // two members you can still flip direction (e.g. Amit→you becomes you→Amit).
+  function pickFrom(id: number) { if (id === to) setTo(from); setFrom(id) }
+  function pickTo(id: number) { if (id === from) setFrom(to); setTo(id) }
+
   const parsedAmount = parseFloat(amount)
   const isValid = from != null && to != null && from !== to && !isNaN(parsedAmount) && parsedAmount > 0
 
@@ -107,9 +112,9 @@ export function Settle() {
     )
   }
 
-  const MemberPicker = ({ value, onPick, exclude }: { value: number | null; onPick: (id: number) => void; exclude: number | null }) => (
+  const MemberPicker = ({ value, onPick }: { value: number | null; onPick: (id: number) => void }) => (
     <div className="flex flex-wrap gap-2">
-      {members.filter(m => m.id !== exclude).map(m => (
+      {members.map(m => (
         <button key={m.id} type="button" onClick={() => onPick(m.id)}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors
             ${value === m.id ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'}`}>
@@ -149,13 +154,13 @@ export function Settle() {
 
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">{kind === 'loan' ? 'Lent by' : 'Paid by'}</label>
-          <MemberPicker value={from} onPick={setFrom} exclude={to} />
+          <MemberPicker value={from} onPick={pickFrom} />
           {from == null && <p className="text-xs text-amber-600 mt-1">Pick who paid. (Claim your slot in Settings to have this default to you.)</p>}
         </div>
 
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1.5">{kind === 'loan' ? 'Lent to' : 'Paid to'}</label>
-          <MemberPicker value={to} onPick={setTo} exclude={from} />
+          <MemberPicker value={to} onPick={pickTo} />
         </div>
 
         <div>
