@@ -30,7 +30,7 @@ export function TransactionDetailModal({
         <div className="flex items-start justify-between gap-3 mb-4">
           <h2 className="text-lg font-bold text-zinc-900">
             {event.type === 'EXPENSE' && 'Expense'}
-            {event.type === 'SETTLEMENT' && 'Settlement'}
+            {event.type === 'SETTLEMENT' && ((event as Settlement).kind === 'loan' ? 'Loan' : 'Settlement')}
             {event.type === 'EXPENSE_DELETION' && 'Deleted expense'}
             {event.type === 'CONFIG_CHANGE' && 'Change log entry'}
           </h2>
@@ -108,11 +108,27 @@ export function TransactionDetailModal({
             <div className="space-y-3">
               <p className="text-2xl font-bold text-zinc-900">{formatAmount(s.amount, s.currency)}</p>
               <p className="text-sm text-zinc-700">
-                <span className="font-semibold">{memberName(s.from, config)}</span> paid{' '}
+                <span className="font-semibold">{memberName(s.from, config)}</span> {s.kind === 'loan' ? 'lent' : 'paid'}{' '}
                 <span className="font-semibold">{memberName(s.to, config)}</span>
               </p>
-              <p className="text-xs text-zinc-400">{new Date(s.createdAt).toLocaleString()}</p>
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <span className="px-2 py-1 rounded-lg bg-zinc-100 text-zinc-600 font-medium">{s.date ?? s.createdAt.slice(0, 10)}</span>
+                {s.supersedesId && <span className="px-2 py-1 rounded-lg bg-amber-100 text-amber-700 font-medium">edited</span>}
+              </div>
+              <p className="text-xs text-zinc-400">Recorded {new Date(s.createdAt).toLocaleString()}</p>
               {s.note && <p className="text-sm text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2">{s.note}</p>}
+              {(canEdit || onDelete) && (
+                <div className="flex gap-3 pt-2">
+                  {canEdit && editUrl && (
+                    <Link to={editUrl} onClick={onClose}
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl text-sm text-center transition-colors">Edit</Link>
+                  )}
+                  {canEdit && onDelete && (
+                    <button onClick={() => { onDelete(); onClose() }}
+                      className="flex-1 border border-red-300 text-red-600 font-semibold py-2.5 rounded-xl text-sm hover:bg-red-50 transition-colors">Delete</button>
+                  )}
+                </div>
+              )}
             </div>
           )
         })()}

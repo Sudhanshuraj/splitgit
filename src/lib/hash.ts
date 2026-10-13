@@ -41,6 +41,11 @@ export async function hashSettlement(s: HashableSettlement): Promise<string> {
     to: s.to,
     amount: s.amount,
     currency: s.currency,
+    // Optional fields are only hashed when present so hashes of settlements
+    // written before these fields existed stay valid.
+    ...(s.date ? { date: s.date } : {}),
+    ...(s.kind ? { kind: s.kind } : {}),
+    ...(s.supersedesId ? { supersedesId: s.supersedesId } : {}),
     createdAt: s.createdAt
   })
   return sha256(canonical)

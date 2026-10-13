@@ -7,7 +7,7 @@ import { useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { readEvents, resolveExpenses, buildDeletion } from '../lib/eventLog'
+import { readEvents, resolveExpenses, resolveSettlements, buildDeletion } from '../lib/eventLog'
 import { optimisticAppend } from '../lib/optimistic'
 import { computeNetBalances, minimumTransactions, formatAmount } from '../lib/balances'
 import { inviteMember, getGroupConfig, getRepoArchived } from '../lib/github'
@@ -23,6 +23,10 @@ function eventDate(e: Event): Date {
   if (e.type === 'EXPENSE') {
     const iso = (e as Expense).date ?? e.createdAt.slice(0, 10)
     const [y, m, d] = iso.split('-').map(Number)
+    return new Date(y!, m! - 1, d!)
+  }
+  if (e.type === 'SETTLEMENT' && (e as Settlement).date) {
+    const [y, m, d] = (e as Settlement).date!.split('-').map(Number)
     return new Date(y!, m! - 1, d!)
   }
   return new Date(e.createdAt)
@@ -92,7 +96,7 @@ export function Group() {
 
   const effectiveEvents = useMemo(() => [
     ...resolveExpenses(events),
-    ...events.filter(e => e.type === 'SETTLEMENT')
+    ...resolveSettlements(events)
   ] as Event[], [events])
 
   const balances = computeNetBalances(effectiveEvents)
@@ -103,12 +107,11 @@ export function Group() {
   const deletedExpenseIds = new Set(
     events.filter(e => e.type === 'EXPENSE_DELETION').map(e => (e as ExpenseDeletion).deletedId)
   )
+  const hasSupersedes = (e: Event) => (e.type === 'EXPENSE' || e.type === 'SETTLEMENT') && !!(e as Expense | Settlement).supersedesId
   const supersededIds = new Set(
-    events.filter(e => e.type === 'EXPENSE' && (e as Expense).supersedesId).map(e => (e as Expense).supersedesId!)
+    events.filter(hasSupersedes).map(e => (e as Expense | Settlement).supersedesId!)
   )
-  const correctedIds = new Set(
-    events.filter(e => e.type === 'EXPENSE' && (e as Expense).supersedesId).map(e => e.id)
-  )
+  const correctedIds = new Set(events.filter(hasSupersedes).map(e => e.id))
 
   const isOwner = owner === user?.login
 
@@ -257,8 +260,8 @@ export function Group() {
       {confirmDeleteId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 pb-safe">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-xl font-bold text-zinc-900 mb-2">Delete Expense?</h2>
-            <p className="text-sm text-zinc-500 mb-1">The expense will be hidden from balances and history.</p>
+            <h2 className="text-xl font-bold text-zinc-900 mb-2">Delete this entry?</h2>
+            <p className="text-sm text-zinc-500 mb-1">It will be removed from balances and history (the log still keeps it).</p>
             <p className="text-xs text-zinc-400 mb-5">The original commit is preserved in git history.</p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmDeleteId(null)} className="flex-1 border border-zinc-300 text-zinc-700 font-medium py-3 rounded-xl hover:bg-zinc-50 transition-colors">Cancel</button>
@@ -306,6 +309,10 @@ export function Group() {
                   {myId != null && myId === s.from && (
                     <Link to={`/groups/${owner}/${repo}/settle`} state={{ to: s.to, amount: s.amount }}
                       className="text-xs bg-emerald-50 text-emerald-700 font-semibold px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors">Settle</Link>
+                  )}
+                  {myId != null && myId === s.to && (
+                    <Link to={`/groups/${owner}/${repo}/settle`} state={{ from: s.from, to: s.to, amount: s.amount }}
+                      className="text-xs bg-emerald-50 text-emerald-700 font-semibold px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors">Received</Link>
                   )}
                 </div>
               ))}
@@ -406,9 +413,14 @@ export function Group() {
           event={detailEvent}
           config={config ?? null}
           tags={config?.tags ?? []}
-          canEdit={detailEvent.type === 'EXPENSE' && ((myId != null && isPayer(detailEvent as Expense, myId)) || isOwner)}
-          editUrl={`/groups/${owner}/${repo}/edit/${detailEvent.id}`}
-          onDelete={detailEvent.type === 'EXPENSE' ? () => setConfirmDeleteId(detailEvent.id) : undefined}
+          canEdit={
+            (detailEvent.type === 'EXPENSE' && ((myId != null && isPayer(detailEvent as Expense, myId)) || isOwner)) ||
+            (detailEvent.type === 'SETTLEMENT' && ((myId != null && (myId === (detailEvent as Settlement).from || myId === (detailEvent as Settlement).to)) || isOwner))
+          }
+          editUrl={detailEvent.type === 'SETTLEMENT'
+            ? `/groups/${owner}/${repo}/settlement/${detailEvent.id}/edit`
+            : `/groups/${owner}/${repo}/edit/${detailEvent.id}`}
+          onDelete={(detailEvent.type === 'EXPENSE' || detailEvent.type === 'SETTLEMENT') ? () => setConfirmDeleteId(detailEvent.id) : undefined}
           onClose={() => setDetailEvent(null)}
           originalExpense={detailEvent.type === 'EXPENSE_DELETION' ? expenseById.get((detailEvent as ExpenseDeletion).deletedId) ?? null : undefined}
         />
@@ -464,7 +476,7 @@ function EventRow({
       <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-lg shrink-0">✅</div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-zinc-900 text-sm">{memberName(s.from, config)} → {memberName(s.to, config)}</p>
-        <p className="text-xs text-zinc-400">Settlement · {dateStr}</p>
+        <p className="text-xs text-zinc-400">{s.kind === 'loan' ? 'Loan' : 'Settlement'} · {dateStr}{s.note ? ` · ${s.note}` : ''}</p>
       </div>
       <p className="font-semibold text-emerald-600 shrink-0">{formatAmount(s.amount, s.currency)}</p>
     </button>
@@ -541,7 +553,7 @@ function ActivityRow({ event, config, expenseById, onOpenDetail }: {
       <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-lg shrink-0">💵</div>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-zinc-900">
-          <span className="font-medium">Settlement:</span> {memberName(s.from, config)} → {memberName(s.to, config)}
+          <span className="font-medium">{s.supersedesId ? 'Edited ' : ''}{s.kind === 'loan' ? 'Loan' : 'Settlement'}:</span> {memberName(s.from, config)} → {memberName(s.to, config)}
         </p>
         <p className="text-xs text-zinc-400">{time}{s.note ? ` · ${s.note}` : ''}</p>
       </div>

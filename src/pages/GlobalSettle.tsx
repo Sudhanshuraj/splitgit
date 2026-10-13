@@ -9,11 +9,12 @@ import { useState } from 'react'
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { listGroups, getGroupConfig } from '../lib/github'
-import { readEvents, addSettlement, resolveExpenses } from '../lib/eventLog'
+import { readEvents, addSettlement, resolveExpenses, resolveSettlements } from '../lib/eventLog'
 import { computeCrossGroupSettlements, formatAmount } from '../lib/balances'
 import { myMemberId } from '../lib/members'
 import type { CrossGroupDebtEdge, GroupEvents } from '../lib/balances'
 import { Spinner } from '../components/Spinner'
+import { DatePicker } from '../components/DatePicker'
 import type { Group, GroupConfig } from '../types'
 
 export function GlobalSettle() {
@@ -23,6 +24,8 @@ export function GlobalSettle() {
   const [settling, setSettling] = useState<CrossGroupDebtEdge | null>(null)
   const [chosenGroup, setChosenGroup] = useState<{ owner: string; name: string } | null>(null)
   const [note, setNote] = useState('')
+  const [amountStr, setAmountStr] = useState('')
+  const [dateStr, setDateStr] = useState(() => new Date().toISOString().slice(0, 10))
 
   const groupsQuery = useQuery({
     queryKey: ['groups'],
@@ -56,7 +59,7 @@ export function GlobalSettle() {
     const config = configQueries[i]?.data?.config as GroupConfig | undefined
     const firstExpense = raw.find(e => e.type === 'EXPENSE')
     // Apply edits + deletions before computing balances (same as the group tab)
-    const events = [...resolveExpenses(raw), ...raw.filter(e => e.type === 'SETTLEMENT')]
+    const events = [...resolveExpenses(raw), ...resolveSettlements(raw)]
     return {
       owner: g.owner,
       name: g.name,
@@ -74,22 +77,34 @@ export function GlobalSettle() {
     mutationFn: async () => {
       if (!settling || !chosenGroup || !octokit || !user) return null
       const cfg = configQueries[groups.findIndex(g => g.owner === chosenGroup.owner && g.name === chosenGroup.name)]?.data?.config as GroupConfig | undefined
-      const fromId = myMemberId(cfg ?? null, user.login)
-      const toId = cfg?.members.find(m => m.claimedBy === settling.toLogin)?.id
-      if (fromId == null || toId == null) throw new Error('Both people must have claimed a member slot in that group')
+      const amount = parseFloat(amountStr)
+      if (isNaN(amount) || amount <= 0) throw new Error('Enter a valid amount')
+      const meId = myMemberId(cfg ?? null, user.login)
+      if (meId == null) throw new Error('Claim your member slot in that group first (Group Settings)')
+      const receiving = settling.toLogin === user.login
+      const otherKey = receiving ? settling.from : settling.to
+      let otherId: number | undefined
+      if (otherKey.startsWith('login:')) {
+        otherId = cfg?.members.find(m => m.claimedBy === otherKey.slice(6))?.id
+      } else {
+        const prefix = `slot:${chosenGroup.owner}/${chosenGroup.name}#`
+        if (otherKey.startsWith(prefix)) otherId = parseInt(otherKey.slice(prefix.length), 10)
+      }
+      if (otherId == null || isNaN(otherId)) throw new Error('That person has no member slot in the chosen group — pick the group the debt is "via"')
       const res = await addSettlement(octokit, chosenGroup.owner, chosenGroup.name, {
-        from: fromId, to: toId, amount: settling.amount, currency: settling.currency, note: note.trim() || undefined
+        from: receiving ? otherId : meId, to: receiving ? meId : otherId,
+        amount, currency: settling.currency, note: note.trim() || undefined, date: dateStr, kind: 'settlement'
       })
       return { res, owner: chosenGroup.owner, name: chosenGroup.name }
     },
     onSuccess: (data) => {
       if (data) qc.setQueryData(['events', data.owner, data.name], { events: data.res.events, sha: data.res.sha })
-      setSettling(null); setChosenGroup(null); setNote('')
+      setSettling(null); setChosenGroup(null); setNote(''); setAmountStr('')
     }
   })
 
   function openSettle(edge: CrossGroupDebtEdge) {
-    setSettling(edge); setChosenGroup(edge.suggestedGroup); setNote('')
+    setSettling(edge); setChosenGroup(edge.suggestedGroup); setNote(''); setAmountStr(edge.amount.toFixed(2)); setDateStr(new Date().toISOString().slice(0, 10))
   }
 
   const isLoading = groupsQuery.isLoading || (groups.length > 0 && !allLoaded)
@@ -141,10 +156,21 @@ export function GlobalSettle() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 pb-safe">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h2 className="text-xl font-bold text-zinc-900 mb-1">Record Settlement</h2>
-            <p className="text-sm text-zinc-500 mb-5">
-              You are paying <span className="font-semibold text-zinc-800">{settling.toLabel}</span>{' '}
-              <span className="font-semibold text-emerald-600">{formatAmount(settling.amount, settling.currency)}</span>
+            <p className="text-sm text-zinc-500 mb-4">
+              {settling.toLogin === user?.login
+                ? <><span className="font-semibold text-zinc-800">{settling.fromLabel}</span> paid you</>
+                : <>You paid <span className="font-semibold text-zinc-800">{settling.toLabel}</span></>}
+              {' '}— full balance is <span className="font-semibold text-emerald-600">{formatAmount(settling.amount, settling.currency)}</span>
             </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-zinc-700 mb-1.5">Amount (₹) <span className="text-zinc-400 font-normal">— enter less for a partial settlement</span></label>
+              <input type="number" min="0.01" step="0.01" value={amountStr} onChange={e => setAmountStr(e.target.value)}
+                className="w-full border border-zinc-300 rounded-xl px-4 py-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm" />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-zinc-700 mb-1.5">Date</label>
+              <DatePicker value={dateStr} onChange={setDateStr} />
+            </div>
             <div className="mb-4">
               <label className="block text-sm font-medium text-zinc-700 mb-2">Record in which group?</label>
               <div className="space-y-2">
@@ -201,8 +227,10 @@ function EdgeCard({ edge, currentLogin, onSettle }: { edge: CrossGroupDebtEdge; 
         {edge.suggestedGroup && <p className="text-xs text-zinc-400 mt-0.5">via {edge.suggestedGroup.name}</p>}
       </div>
       <p className={`font-bold text-lg shrink-0 ${isMyDebt ? 'text-red-600' : 'text-emerald-600'}`}>{formatAmount(edge.amount, edge.currency)}</p>
-      {isMyDebt && (
-        <button onClick={onSettle} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-2 rounded-lg transition-colors shrink-0">Pay</button>
+      {isMine && (
+        <button onClick={onSettle} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-2 rounded-lg transition-colors shrink-0">
+          {isMyDebt ? 'Pay' : 'Received'}
+        </button>
       )}
       {!isMine && null}
     </div>

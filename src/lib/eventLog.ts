@@ -170,12 +170,16 @@ export async function buildExpense(
   return { ...base, hash }
 }
 
-export async function buildSettlement(input: CreateSettlementInput): Promise<Settlement> {
+export async function buildSettlement(input: CreateSettlementInput, supersedesId?: string): Promise<Settlement> {
   const id = uuidv4()
   const createdAt = new Date().toISOString()
   const base = {
     id, type: 'SETTLEMENT' as const, from: input.from, to: input.to,
-    amount: input.amount, currency: input.currency, note: input.note, createdAt
+    amount: input.amount, currency: input.currency, note: input.note,
+    ...(input.date ? { date: input.date } : {}),
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(supersedesId ? { supersedesId } : {}),
+    createdAt
   }
   const hash = await hashSettlement(base)
   return { ...base, hash }
@@ -260,6 +264,8 @@ export interface CreateSettlementInput {
   amount: number
   currency: string
   note?: string
+  date?: string         // YYYY-MM-DD
+  kind?: 'settlement' | 'loan'
 }
 
 export async function addSettlement(
@@ -436,6 +442,43 @@ export function resolveExpenses(events: Event[]): Expense[] {
     !deletedIds.has(e.id) &&               // not deleted
     (!supersededBy.has(e.id) || supersededBy.get(e.id) === e.id) // latest version
   )
+}
+
+/**
+ * Live settlements: drops deleted ones and ones replaced by a later edit.
+ * Always use this (not a raw SETTLEMENT filter) for balances, otherwise an
+ * edited settlement would be counted twice.
+ */
+export function resolveSettlements(events: Event[]): Settlement[] {
+  const settlements = events.filter(e => e.type === 'SETTLEMENT') as Settlement[]
+  const deletedIds = new Set(
+    events.filter(e => e.type === 'EXPENSE_DELETION').map(e => (e as ExpenseDeletion).deletedId)
+  )
+  const superseded = new Set(settlements.filter(s => s.supersedesId).map(s => s.supersedesId!))
+  return settlements.filter(s => !deletedIds.has(s.id) && !superseded.has(s.id))
+}
+
+/** Same chain-walk as findLatestExpense, for settlements (so edits never fork). */
+export function findLatestSettlement(events: Event[], anyId: string): Settlement | null {
+  const settlements = events.filter(e => e.type === 'SETTLEMENT') as Settlement[]
+  const byId = new Map(settlements.map(s => [s.id, s]))
+  const deletedIds = new Set(
+    events.filter(e => e.type === 'EXPENSE_DELETION').map(e => (e as ExpenseDeletion).deletedId)
+  )
+  const childrenOf = new Map<string, Settlement[]>()
+  for (const s of settlements) {
+    if (s.supersedesId) childrenOf.set(s.supersedesId, [...(childrenOf.get(s.supersedesId) ?? []), s])
+  }
+  let current = byId.get(anyId)
+  if (!current) return null
+  const visited = new Set<string>()
+  while (!visited.has(current.id)) {
+    visited.add(current.id)
+    const kids = childrenOf.get(current.id)
+    if (!kids || kids.length === 0) break
+    current = kids.reduce((a, b) => (a.createdAt > b.createdAt ? a : b))
+  }
+  return deletedIds.has(current.id) ? null : current
 }
 
 /**

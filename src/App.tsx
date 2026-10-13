@@ -98,6 +98,16 @@ export function App() {
         }
       />
 
+      {/* Edit settlement / loan */}
+      <Route
+        path="/groups/:owner/:repo/settlement/:settlementId/edit"
+        element={
+          <RequireAuth>
+            <Layout><Settle /></Layout>
+          </RequireAuth>
+        }
+      />
+
       {/* Edit expense */}
       <Route
         path="/groups/:owner/:repo/edit/:expenseId"

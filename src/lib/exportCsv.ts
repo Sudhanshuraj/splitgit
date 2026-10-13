@@ -11,7 +11,7 @@
  * current, correct state — this is a snapshot of what the app shows today,
  * not the raw append-only log.
  */
-import { resolveExpenses } from './eventLog'
+import { resolveExpenses, resolveSettlements } from './eventLog'
 import { contributionsOf } from './members'
 import type { Event, GroupConfig, LedgerMember } from '../types'
 
@@ -53,10 +53,10 @@ export function buildExpensesCsv(events: Event[], config: GroupConfig | null | u
 }
 
 export function buildSettlementsCsv(events: Event[], config: GroupConfig | null | undefined): string {
-  const settlements = events.filter(e => e.type === 'SETTLEMENT')
+  const settlements = resolveSettlements(events)
   const lines = ['date,from,to,amount,note']
   for (const s of settlements) {
-    const date = s.createdAt.slice(0, 10)
+    const date = s.date ?? s.createdAt.slice(0, 10)
     const from = config?.members.find(m => m.id === s.from)?.name ?? `#${s.from}`
     const to = config?.members.find(m => m.id === s.to)?.name ?? `#${s.to}`
     const row = [date, csvField(from), csvField(to), s.amount.toString(), csvField(s.note ?? '')]

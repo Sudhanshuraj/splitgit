@@ -34,6 +34,9 @@ export interface Settlement {
   amount: number
   currency: string
   note?: string
+  date?: string        // YYYY-MM-DD the payment actually happened (older events have none → createdAt)
+  kind?: 'settlement' | 'loan'  // 'loan' = new money lent; still moves balances, never an expense
+  supersedesId?: string // if set, this is an edit of an earlier settlement
   createdAt: string
   hash: string
 }
